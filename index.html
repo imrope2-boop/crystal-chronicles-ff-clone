@@ -3,1123 +3,129 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Crystal Chronicles - Final Fantasy Clone</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;color:#fff;font-family:'Courier New',monospace;display:flex;justify-content:center;align-items:center;min-height:100vh;overflow:hidden}
-#gameContainer{position:relative;width:800px;height:600px}
-canvas{display:block;image-rendering:pixelated;cursor:default}
-#overlay{position:absolute;top:0;left:0;width:800px;height:600px;pointer-events:none}
-</style>
-</head>
-<body>
-<div id="gameContainer">
-<canvas id="gameCanvas" width="800" height="600"></canvas>
-</div>
-<script>
-// ============================================================
-// CRYSTAL CHRONICLES - Complete Final Fantasy Style RPG
-// ============================================================
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-
-// ============================================================
-// GAME STATES
-// ============================================================
-const STATES = {TITLE:0,WORLD:1,BATTLE:2,MENU:3,DIALOG:4,GAMEOVER:5,VICTORY:6,LEVELUP:7,SHOP:8,CHEST:9};
-let gameState = STATES.TITLE;
-let prevState = STATES.WORLD;
-
-// ============================================================
-// PALETTES & COLORS
-// ============================================================
-const COL = {
-  BLACK:'#000000', WHITE:'#FFFFFF', GOLD:'#FFD700', RED:'#FF4444',
-  BLUE:'#4488FF', GREEN:'#44FF88', PURPLE:'#AA44FF', CYAN:'#44FFFF',
-  ORANGE:'#FF8844', DARKBLUE:'#001133', NAVYBG:'#000820', MENUBG:'#0A0A2A',
-  MENUBORDER:'#4466AA', HP:'#FF4444', MP:'#4488FF', EXP:'#FFD700',
-  GRASS:'#2D5A1B', DARKGRASS:'#1A3A0A', WATER:'#1144AA', SAND:'#C8A84B',
-  MOUNTAIN:'#8B7355', SNOW:'#E8E8FF', FOREST:'#1A4A1A', CAVE:'#333222',
-  ROAD:'#8B7355', TOWN:'#AA8833', DUNGEON:'#222222'
-};
-
-// ============================================================
-// INPUT HANDLING
-// ============================================================
-const keys = {};
-const justPressed = {};
-document.addEventListener('keydown', e => {
-  if(!keys[e.code]) { justPressed[e.code] = true; }
-  keys[e.code] = true;
-  e.preventDefault();
-});
-document.addEventListener('keyup', e => { keys[e.code] = false; });
-function clearJustPressed() { Object.keys(justPressed).forEach(k => delete justPressed[k]); }
-// ============================================================
-// WORLD MAP DATA (20x15 tile grid)
-// ============================================================
-const TILE = {GRASS:0,WATER:1,MOUNTAIN:2,FOREST:3,SAND:4,TOWN:5,CAVE:6,DUNGEON:7,ROAD:8,SNOW:9};
-const worldMap = [
-  [2,2,2,2,2,9,9,2,2,2,2,2,2,2,2,2,2,2,2,2],
-  [2,9,9,9,2,2,9,2,0,0,0,0,0,2,2,2,2,2,0,2],
-  [2,9,6,9,2,2,2,2,0,3,3,0,0,2,2,2,2,0,0,2],
-  [2,2,2,2,2,2,2,0,0,3,3,3,0,0,0,2,2,0,5,2],
-  [2,2,0,0,0,0,0,0,3,3,0,3,0,0,0,0,0,0,0,2],
-  [2,0,0,5,0,0,0,0,3,0,0,0,0,0,0,0,0,5,0,2],
-  [2,0,0,8,0,0,3,3,3,0,0,0,0,0,0,0,0,0,0,2],
-  [2,0,8,8,8,0,3,3,0,0,0,5,0,0,4,4,4,0,0,2],
-  [2,0,8,5,8,0,0,0,0,0,0,0,0,4,4,4,4,4,0,2],
-  [2,0,8,0,8,0,0,0,0,1,1,0,0,4,4,1,1,0,0,2],
-  [2,0,0,0,8,0,0,0,1,1,1,1,0,0,4,1,1,0,0,2],
-  [2,0,0,0,8,8,0,0,1,1,1,1,1,0,0,0,0,0,0,2],
-  [2,0,0,0,0,8,8,0,0,1,1,1,0,0,0,0,0,6,0,2],
-  [2,0,0,0,0,0,8,8,8,7,0,0,0,0,0,0,0,0,0,2],
-  [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
-];
-const TILE_SIZE = 40;
-
-// Towns and caves on the map
-const locations = [
-  {x:3,y:5,name:'Cornelia',type:'town',shopItems:['Potion','HiPotion','Antidote','Tent'],innCost:50},
-  {x:11,y:7,name:'Pravoka',type:'town',shopItems:['Potion','HiPotion','Ether','Tent','Elixir'],innCost:80},
-  {x:17,y:5,name:'Elfheim',type:'town',shopItems:['Elixir','Ether','HiPotion','MegaPotion'],innCost:120},
-  {x:17,y:3,name:'Crescent Lake',type:'town',shopItems:['Elixir','MegaPotion','PhoenixDown','Ether'],innCost:150},
-  {x:3,y:7,name:'Melmond',type:'town',shopItems:['Potion','HiPotion','Ether','Elixir','Tent'],innCost:100},
-  {x:2,y:2,name:'Ice Cave',type:'cave',dungeonId:0},
-  {x:17,y:12,name:'Marsh Cave',type:'cave',dungeonId:1},
-  {x:9,y:13,name:'Chaos Shrine',type:'dungeon',dungeonId:2}
-];
-
-// ============================================================
-// PLAYER DATA
-// ============================================================
-const party = [
-  {
-    name:'WARRIOR',class:'Warrior',level:1,exp:0,expNext:100,
-    hp:220,maxHp:220,mp:0,maxMp:0,
-    str:18,def:15,mag:5,spd:10,
-    weapon:'Wooden Sword',armor:'Leather Armor',
-    skills:[],
-    spells:[],
-    statusEffects:[],
-    alive:true,
-    portrait:'W'
-  },
-  {
-    name:'MAGE',class:'Black Mage',level:1,exp:0,expNext:100,
-    hp:120,maxHp:120,mp:30,maxMp:30,
-    str:8,def:8,mag:18,spd:14,
-    weapon:'Oak Staff',armor:'Cloth Robe',
-    skills:[],
-    spells:['Fire','Blizzard','Thunder'],
-    statusEffects:[],
-    alive:true,
-    portrait:'M'
-  },
-  {
-    name:'HEALER',class:'White Mage',level:1,exp:0,expNext:100,
-    hp:150,maxHp:150,mp:35,maxMp:35,
-    str:10,def:12,mag:16,spd:12,
-    weapon:'Mage Staff',armor:'White Robe',
-    skills:[],
-    spells:['Cure','Cura','Esuna','Life'],
-    statusEffects:[],
-    alive:true,
-    portrait:'H'
-  },
-  {
-    name:'THIEF',class:'Thief',level:1,exp:0,expNext:100,
-    hp:170,maxHp:170,mp:10,maxMp:10,
-    str:14,def:10,mag:8,spd:18,
-    weapon:'Iron Dagger',armor:'Light Armor',
-    skills:['Steal','Flee'],
-    spells:[],
-    statusEffects:[],
-    alive:true,
-    portrait:'T'
-  }
-];
-
-const inventory = {
-  gold: 500,
-  items: [
-    {name:'Potion',qty:5,type:'item',target:'single',effect:'heal',value:100,desc:'Restores 100 HP'},
-    {name:'HiPotion',qty:2,type:'item',target:'single',effect:'heal',value:250,desc:'Restores 250 HP'},
-    {name:'Ether',qty:2,type:'item',target:'single',effect:'mp',value:30,desc:'Restores 30 MP'},
-    {name:'Antidote',qty:3,type:'item',target:'single',effect:'cure_poison',value:0,desc:'Cures Poison'},
-    {name:'Tent',qty:1,type:'item',target:'all',effect:'rest',value:0,desc:'Restore HP/MP (field)'}
-  ]
-};
-
-let playerX = 3, playerY = 8;
-let cameraX = 0, cameraY = 0;
-const VIEW_TILES_X = Math.floor(800/TILE_SIZE);
-const VIEW_TILES_Y = Math.floor(480/TILE_SIZE);
-// ============================================================
-// SPELL DATABASE
-// ============================================================
-const SPELLS = {
-  'Fire':   {mp:5, type:'magic',element:'fire',damage:[60,80],target:'single',desc:'Fire damage to one enemy',color:'#FF6600'},
-  'Fira':   {mp:15,type:'magic',element:'fire',damage:[120,160],target:'single',desc:'Medium fire damage',color:'#FF4400'},
-  'Firaga': {mp:30,type:'magic',element:'fire',damage:[250,320],target:'single',desc:'Massive fire damage',color:'#FF2200'},
-  'Blizzard':{mp:5,type:'magic',element:'ice',damage:[60,80],target:'single',desc:'Ice damage to one enemy',color:'#88CCFF'},
-  'Blizzara':{mp:15,type:'magic',element:'ice',damage:[120,160],target:'single',desc:'Medium ice damage',color:'#44AAFF'},
-  'Blizzaga':{mp:30,type:'magic',element:'ice',damage:[250,320],target:'single',desc:'Massive ice damage',color:'#2266FF'},
-  'Thunder': {mp:5, type:'magic',element:'lightning',damage:[60,80],target:'single',desc:'Lightning damage',color:'#FFFF44'},
-  'Thundara':{mp:15,type:'magic',element:'lightning',damage:[120,160],target:'single',desc:'Medium lightning',color:'#FFDD00'},
-  'Thundaga':{mp:30,type:'magic',element:'lightning',damage:[250,320],target:'single',desc:'Massive lightning',color:'#FFAA00'},
-  'Cure':   {mp:8, type:'heal',damage:[-100,-120],target:'single',desc:'Restores HP to ally',color:'#44FF88'},
-  'Cura':   {mp:18,type:'heal',damage:[-250,-300],target:'single',desc:'Greatly restores HP',color:'#00FF66'},
-  'Curaga': {mp:35,type:'heal',damage:[-600,-700],target:'single',desc:'Fully restores HP',color:'#00FFAA'},
-  'Esuna':  {mp:10,type:'status',effect:'cure_all',target:'single',desc:'Cures all status effects',color:'#AAFFAA'},
-  'Life':   {mp:25,type:'revive',damage:[-100,-100],target:'single',desc:'Revives KO ally',color:'#FFFFFF'},
-  'Shell':  {mp:12,type:'buff',effect:'shell',target:'single',desc:'Raises magic defense',color:'#AAAAFF'},
-  'Protect':{mp:12,type:'buff',effect:'protect',target:'single',desc:'Raises physical defense',color:'#FFAAAA'},
-  'Haste':  {mp:15,type:'buff',effect:'haste',target:'single',desc:'Increases speed',color:'#FFFFAA'},
-  'Drain':  {mp:18,type:'drain',damage:[80,120],target:'single',desc:'Drains enemy HP',color:'#AA44FF'},
-  'Bio':    {mp:20,type:'magic',element:'poison',damage:[100,150],target:'single',desc:'Poisons and damages',color:'#88FF44'},
-  'Quake':  {mp:28,type:'magic',element:'earth',damage:[180,240],target:'all',desc:'Earth damage to all enemies',color:'#AA8844'},
-  'Meteor': {mp:45,type:'magic',element:'non',damage:[400,600],target:'all',desc:'Ultimate non-elemental magic',color:'#FF88FF'},
-};
-
-// ============================================================
-// ENEMY DATABASE
-// ============================================================
-const ENEMIES = {
-  'Goblin':     {hp:45,maxHp:45,mp:0,str:12,def:8,mag:4,spd:8,exp:30,gold:20,actions:['attack','attack','attack'],spells:[],icon:'G',color:'#44FF44',desc:'A small green goblin'},
-  'Imp':        {hp:38,maxHp:38,mp:8,str:10,def:6,mag:10,spd:12,exp:25,gold:15,actions:['attack','magic','attack'],spells:['Fire'],icon:'I',color:'#FF44FF',desc:'A mischievous imp'},
-  'Wolf':       {hp:60,maxHp:60,mp:0,str:16,def:10,mag:4,spd:14,exp:40,gold:25,actions:['attack','attack'],icon:'W',color:'#AAAAAA',desc:'A fierce wolf'},
-  'Skeleton':   {hp:80,maxHp:80,mp:0,str:20,def:12,mag:0,spd:8,exp:55,gold:35,actions:['attack','attack','attack'],icon:'S',color:'#EEEEEE',desc:'Undead skeleton'},
-  'Lizardman':  {hp:120,maxHp:120,mp:0,str:25,def:18,mag:8,spd:10,exp:80,gold:50,actions:['attack','attack','attack'],icon:'L',color:'#44AA44',desc:'A scaly lizardman'},
-  'Ogre':       {hp:180,maxHp:180,mp:0,str:30,def:22,mag:5,spd:6,exp:120,gold:80,actions:['attack','attack','special'],icon:'O',color:'#AA6633',desc:'A powerful ogre'},
-  'Harpy':      {hp:100,maxHp:100,mp:20,str:22,def:14,mag:15,spd:16,exp:100,gold:65,actions:['attack','magic','attack'],spells:['Thunder'],icon:'H',color:'#FFAAFF',desc:'A winged harpy'},
-  'Vampire':    {hp:200,maxHp:200,mp:30,str:28,def:20,mag:20,spd:14,exp:180,gold:120,actions:['attack','magic','drain'],spells:['Bio'],icon:'V',color:'#AA44AA',desc:'A blood-thirsty vampire'},
-  'Troll':      {hp:250,maxHp:250,mp:0,str:35,def:28,mag:5,spd:5,exp:200,gold:150,actions:['attack','attack','special'],icon:'T',color:'#558855',desc:'A regenerating troll'},
-  'Wyvern':     {hp:320,maxHp:320,mp:40,str:40,def:30,mag:25,spd:12,exp:280,gold:200,actions:['attack','magic','special'],spells:['Fire'],icon:'W',color:'#FF8844',desc:'A fire-breathing wyvern'},
-  'Lich':       {hp:450,maxHp:450,mp:80,str:35,def:25,mag:45,spd:10,exp:500,gold:400,boss:true,actions:['magic','magic','attack','special'],spells:['Blizzaga','Thundaga','Bio'],icon:'L',color:'#8888FF',desc:'Lich, Fiend of Earth'},
-  'Marilith':   {hp:600,maxHp:600,mp:60,str:50,def:35,mag:35,spd:15,exp:700,gold:500,boss:true,actions:['attack','attack','magic','special'],spells:['Firaga'],icon:'M',color:'#FF4444',desc:'Marilith, Fiend of Fire'},
-  'Kraken':     {hp:800,maxHp:800,mp:70,str:55,def:40,mag:40,spd:8,exp:900,gold:600,boss:true,actions:['attack','magic','attack','special'],spells:['Blizzaga'],icon:'K',color:'#4444FF',desc:'Kraken, Fiend of Water'},
-  'Tiamat':     {hp:1000,maxHp:1000,mp:80,str:60,def:45,mag:50,spd:12,exp:1200,gold:800,boss:true,actions:['magic','attack','magic','special'],spells:['Thundaga','Meteor'],icon:'T',color:'#AA44FF',desc:'Tiamat, Fiend of Wind'},
-  'Chaos':      {hp:2000,maxHp:2000,mp:100,str:70,def:50,mag:60,spd:14,exp:5000,gold:2000,boss:true,actions:['magic','attack','special','magic'],spells:['Meteor','Thundaga','Firaga'],icon:'C',color:'#FF0000',desc:'CHAOS, Master of Discord'},
-};
-
-// Area encounter tables
-const ENCOUNTERS = {
-  grass:    ['Goblin','Goblin','Wolf','Imp','Goblin'],
-  forest:   ['Lizardman','Wolf','Harpy','Skeleton','Goblin'],
-  cave:     ['Skeleton','Vampire','Troll','Ogre','Harpy'],
-  dungeon:  ['Vampire','Wyvern','Troll','Lich'],
-  mountain: ['Ogre','Harpy','Wyvern','Wolf'],
-};
-// ============================================================
-// BATTLE SYSTEM
-// ============================================================
-let battle = {
-  enemies: [],
-  turn: 0,
-  phase: 'select', // select, action, enemy_action, result, flee
-  selectedAction: null,
-  selectedTarget: -1,
-  selectedMember: 0,
-  selectedSpell: 0,
-  selectedItem: 0,
-  menuStack: [], // 'main', 'magic', 'item', 'target'
-  currentMenu: 'main',
-  log: [],
-  fleeAttempts: 0,
-  turnOrder: [],
-  currentTurnIdx: 0,
-  actionQueue: [],
-  animating: false,
-  animTimer: 0,
-  shakeX: 0,
-  flashColor: null,
-  particleSystem: [],
-};
-
-function createParticles(x, y, color, count) {
-  for(let i=0; i<count; i++) {
-    battle.particleSystem.push({
-      x, y, vx: (Math.random()-0.5)*6, vy: (Math.random()-0.7)*8,
-      life: 1.0, decay: 0.04+Math.random()*0.03, color,
-      size: 3+Math.random()*5
-    });
-  }
-}
-
-function updateParticles() {
-  battle.particleSystem = battle.particleSystem.filter(p => {
-    p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.life -= p.decay;
-    return p.life > 0;
-  });
-}
-
-function startBattle(area) {
-  const table = ENCOUNTERS[area] || ENCOUNTERS.grass;
-  const count = 1 + Math.floor(Math.random() * 3);
-  battle.enemies = [];
-  const usedNames = [];
-  for(let i=0; i<Math.min(count, 4); i++) {
-    const name = table[Math.floor(Math.random()*table.length)];
-    const template = ENEMIES[name];
-    const suffix = usedNames.filter(n=>n===name).length > 0 ? '-' + (usedNames.filter(n=>n===name).length+1) : '';
-    usedNames.push(name);
-    battle.enemies.push({
-      ...JSON.parse(JSON.stringify(template)),
-      displayName: name + suffix,
-      statusEffects: [],
-      dead: false
-    });
-  }
-  battle.turn = 0;
-  battle.phase = 'select';
-  battle.selectedMember = getFirstAlive();
-  battle.currentMenu = 'main';
-  battle.menuStack = [];
-  battle.log = ['A battle begins!'];
-  battle.particleSystem = [];
-  battle.turnOrder = buildTurnOrder();
-  battle.currentTurnIdx = 0;
-  gameState = STATES.BATTLE;
-}
-
-function getFirstAlive() {
-  return party.findIndex(m => m.alive && m.hp > 0);
-}
-
-function buildTurnOrder() {
-  const order = [];
-  party.forEach((m, i) => { if(m.alive) order.push({type:'player', idx:i, spd:m.spd+Math.random()*4}); });
-  battle.enemies.forEach((e, i) => { if(!e.dead) order.push({type:'enemy', idx:i, spd:e.spd+Math.random()*4}); });
-  return order.sort((a,b) => b.spd - a.spd);
-}
-
-function battleLog(msg) {
-  battle.log.push(msg);
-  if(battle.log.length > 5) battle.log.shift();
-}
-
-function applyDamage(target, dmg, isHeal) {
-  if(isHeal) {
-    target.hp = Math.min(target.maxHp, target.hp + dmg);
-  } else {
-    dmg = Math.max(1, dmg - (target.def || 0) / 3 | 0);
-    target.hp = Math.max(0, target.hp - dmg);
-    if(target.hp <= 0) {
-      if(target.alive !== undefined) { target.alive = false; }
-      else { target.dead = true; }
-    }
-  }
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Crystal Chronicles - FF Clone</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #000; color: #fff; font-family: "Courier New", monospace; display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
-#gameContainer { position: relative; }
-canvas { display: block; image-rendering: pixelated; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#fff;font-family:"Courier New",monospace;display:flex;justify-content:center;align-items:center;min-height:100vh;overflow:hidden}
+#gc{position:relative}
+canvas{display:block;image-rendering:pixelated}
 </style>
 </head>
 <body>
-<div id="gameContainer"><canvas id="gameCanvas" width="800" height="600"></canvas></div>
+<div id="gc"><canvas id="c" width="800" height="600"></canvas></div>
 <script>
-const canvas=document.getElementById('gameCanvas'),ctx=canvas.getContext('2d');
-const STATES={TITLE:0,WORLD:1,BATTLE:2,MENU:3,DIALOG:4,GAMEOVER:5,VICTORY:6,LEVELUP:7,SHOP:8};
-let gameState=STATES.TITLE,prevState=STATES.WORLD;
-const keys={},justPressed={};
-document.addEventListener('keydown',e=>{if(!keys[e.code])justPressed[e.code]=true;keys[e.code]=true;e.preventDefault();});
-document.addEventListener('keyup',e=>{keys[e.code]=false;});
-function clrJP(){Object.keys(justPressed).forEach(k=>delete justPressed[k]);}
-const COL={BLACK:'#000000',WHITE:'#FFFFFF',GOLD:'#FFD700',RED:'#FF4444',BLUE:'#4488FF',GREEN:'#44FF88',PURPLE:'#AA44FF',CYAN:'#44FFFF',ORANGE:'#FF8844',DARKBLUE:'#001133',NAVYBG:'#000820',MENUBG:'rgba(5,5,25,0.97)',MENUBORDER:'#4466AA',HP:'#FF4444',MP:'#4488FF',EXP:'#FFD700',GRASS:'#2D5A1B',GRASS2:'#234A13',WATER:'#1144AA',WATER2:'#0D3380',SAND:'#C8A84B',MOUNTAIN:'#8B7355',MOUNTAIN2:'#6B5335',SNOW:'#E8E8FF',FOREST:'#1A4A1A',CAVE:'#333222',ROAD:'#9B8365',TOWN:'#AA8833',DUNGEON:'#222222'};
-
-// WORLD MAP
-const TILE={GRASS:0,WATER:1,MOUNTAIN:2,FOREST:3,SAND:4,TOWN:5,CAVE:6,DUNGEON:7,ROAD:8,SNOW:9};
-const worldMap=[
-[2,2,2,2,2,9,9,2,2,2,2,2,2,2,2,2,2,2,2,2],
-[2,9,9,9,2,2,9,2,0,0,0,0,0,2,2,2,2,2,0,2],
-[2,9,6,9,2,2,2,2,0,3,3,0,0,2,2,2,2,0,0,2],
-[2,2,2,2,2,2,2,0,0,3,3,3,0,0,0,2,2,0,5,2],
-[2,2,0,0,0,0,0,0,3,3,0,3,0,0,0,0,0,0,0,2],
-[2,0,0,5,0,0,0,0,3,0,0,0,0,0,0,0,0,5,0,2],
-[2,0,0,8,0,0,3,3,3,0,0,0,0,0,0,0,0,0,0,2],
-[2,0,8,8,8,0,3,3,0,0,0,5,0,0,4,4,4,0,0,2],
-[2,0,8,5,8,0,0,0,0,0,0,0,0,4,4,4,4,4,0,2],
-[2,0,8,0,8,0,0,0,0,1,1,0,0,4,4,1,1,0,0,2],
-[2,0,0,0,8,0,0,0,1,1,1,1,0,0,4,1,1,0,0,2],
-[2,0,0,0,8,8,0,0,1,1,1,1,1,0,0,0,0,0,0,2],
-[2,0,0,0,0,8,8,0,0,1,1,1,0,0,0,0,0,6,0,2],
-[2,0,0,0,0,0,8,8,8,7,0,0,0,0,0,0,0,0,0,2],
-[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
-const TS=40;
-const locations=[
-{x:3,y:5,name:'Cornelia',type:'town',shopItems:['Potion','HiPotion','Antidote','Tent'],innCost:50},
-{x:11,y:7,name:'Pravoka',type:'town',shopItems:['Potion','HiPotion','Ether','Tent','Elixir'],innCost:80},
-{x:17,y:5,name:'Elfheim',type:'town',shopItems:['Elixir','Ether','HiPotion','MegaPotion'],innCost:120},
-{x:17,y:3,name:'Crescent Lake',type:'town',shopItems:['Elixir','MegaPotion','PhoenixDown','Ether'],innCost:150},
-{x:3,y:7,name:'Melmond',type:'town',shopItems:['Potion','HiPotion','Ether','Elixir','Tent'],innCost:100},
-{x:2,y:2,name:'Ice Cave',type:'cave',dungeonId:0},
-{x:17,y:12,name:'Marsh Cave',type:'cave',dungeonId:1},
-{x:9,y:13,name:'Chaos Shrine',type:'dungeon',dungeonId:2}
-];
-
-// PARTY DATA
-const party=[
-{name:'WARRIOR',cls:'Warrior',level:1,exp:0,expNext:100,hp:220,maxHp:220,mp:0,maxMp:0,str:18,def:15,mag:5,spd:10,weapon:'Iron Sword',armor:'Chain Mail',spells:[],alive:true,portrait:'W'},
-{name:'MAGE',cls:'Black Mage',level:1,exp:0,expNext:100,hp:120,maxHp:120,mp:30,maxMp:30,str:8,def:8,mag:18,spd:14,weapon:'Oak Staff',armor:'Cloth Robe',spells:['Fire','Blizzard','Thunder'],alive:true,portrait:'M'},
-{name:'HEALER',cls:'White Mage',level:1,exp:0,expNext:100,hp:150,maxHp:150,mp:35,maxMp:35,str:10,def:12,mag:16,spd:12,weapon:'Mage Staff',armor:'White Robe',spells:['Cure','Cura','Esuna','Life'],alive:true,portrait:'H'},
-{name:'THIEF',cls:'Thief',level:1,exp:0,expNext:100,hp:170,maxHp:170,mp:10,maxMp:10,str:14,def:10,mag:8,spd:18,weapon:'Iron Dagger',armor:'Light Armor',spells:[],alive:true,portrait:'T'}
-];
-const inventory={gold:500,items:[
-{name:'Potion',qty:5,type:'item',target:'single',effect:'heal',value:100,desc:'Restores 100 HP',cost:50},
-{name:'HiPotion',qty:2,type:'item',target:'single',effect:'heal',value:250,desc:'Restores 250 HP',cost:150},
-{name:'Ether',qty:2,type:'item',target:'single',effect:'mp',value:30,desc:'Restores 30 MP',cost:100},
-{name:'Antidote',qty:3,type:'item',target:'single',effect:'cure_poison',value:0,desc:'Cures Poison',cost:40},
-{name:'Tent',qty:1,type:'item',target:'all',effect:'rest',value:0,desc:'Restore HP/MP on map',cost:200},
-{name:'PhoenixDown',qty:1,type:'item',target:'single',effect:'revive',value:0,desc:'Revives KO ally',cost:300},
-{name:'Elixir',qty:1,type:'item',target:'single',effect:'elixir',value:0,desc:'Fully restores HP+MP',cost:500},
-{name:'MegaPotion',qty:0,type:'item',target:'single',effect:'heal',value:500,desc:'Restores 500 HP',cost:300}
-]};
-let px=3,py=8,camX=0,camY=0;
-const VTX=Math.floor(800/TS),VTY=Math.floor(480/TS);
-
-// SPELL DATABASE
-const SPELLS={
-'Fire':{mp:5,type:'magic',elem:'fire',dmgMin:55,dmgMax:75,tgt:'single',color:'#FF6600'},
-'Fira':{mp:15,type:'magic',elem:'fire',dmgMin:115,dmgMax:155,tgt:'single',color:'#FF4400'},
-'Firaga':{mp:30,type:'magic',elem:'fire',dmgMin:240,dmgMax:320,tgt:'single',color:'#FF2200'},
-'Blizzard':{mp:5,type:'magic',elem:'ice',dmgMin:55,dmgMax:75,tgt:'single',color:'#88CCFF'},
-'Blizzara':{mp:15,type:'magic',elem:'ice',dmgMin:115,dmgMax:155,tgt:'single',color:'#44AAFF'},
-'Blizzaga':{mp:30,type:'magic',elem:'ice',dmgMin:240,dmgMax:320,tgt:'single',color:'#2266FF'},
-'Thunder':{mp:5,type:'magic',elem:'lightning',dmgMin:55,dmgMax:75,tgt:'single',color:'#FFFF44'},
-'Thundara':{mp:15,type:'magic',elem:'lightning',dmgMin:115,dmgMax:155,tgt:'single',color:'#FFDD00'},
-'Thundaga':{mp:30,type:'magic',elem:'lightning',dmgMin:240,dmgMax:320,tgt:'single',color:'#FFAA00'},
-'Quake':{mp:28,type:'magic',elem:'earth',dmgMin:180,dmgMax:240,tgt:'all',color:'#AA8844'},
-'Meteor':{mp:45,type:'magic',elem:'none',dmgMin:400,dmgMax:600,tgt:'all',color:'#FF88FF'},
-'Bio':{mp:20,type:'magic',elem:'poison',dmgMin:100,dmgMax:150,tgt:'single',color:'#88FF44'},
-'Drain':{mp:18,type:'drain',dmgMin:80,dmgMax:120,tgt:'single',color:'#AA44FF'},
-'Cure':{mp:8,type:'heal',dmgMin:100,dmgMax:120,tgt:'single',color:'#44FF88'},
-'Cura':{mp:18,type:'heal',dmgMin:250,dmgMax:300,tgt:'single',color:'#00FF66'},
-'Curaga':{mp:35,type:'heal',dmgMin:600,dmgMax:700,tgt:'single',color:'#00FFAA'},
-'Esuna':{mp:10,type:'status',effect:'cure_all',tgt:'single',color:'#AAFFAA'},
-'Life':{mp:25,type:'revive',tgt:'single',color:'#FFFFFF'},
-'Shell':{mp:12,type:'buff',effect:'shell',tgt:'single',color:'#AAAAFF'},
-'Protect':{mp:12,type:'buff',effect:'protect',tgt:'single',color:'#FFAAAA'},
-'Haste':{mp:15,type:'buff',effect:'haste',tgt:'single',color:'#FFFFAA'},
-'Holy':{mp:40,type:'magic',elem:'holy',dmgMin:350,dmgMax:500,tgt:'single',color:'#FFFFCC'}
-};
-const ITEM_COSTS={Potion:50,HiPotion:150,Ether:100,Antidote:40,Tent:200,PhoenixDown:300,Elixir:500,MegaPotion:300};
-
-// ENEMY DATABASE
-const ENEMIES={
-'Goblin':{hp:45,mp:0,str:12,def:8,mag:4,spd:8,exp:30,gold:20,actions:['attack','attack','attack'],spells:[],icon:'G',color:'#44FF44'},
-'Imp':{hp:38,mp:8,str:10,def:6,mag:10,spd:12,exp:25,gold:15,actions:['attack','magic','attack'],spells:['Fire'],icon:'I',color:'#FF44FF'},
-'Wolf':{hp:60,mp:0,str:16,def:10,mag:4,spd:14,exp:40,gold:25,actions:['attack','attack'],spells:[],icon:'W',color:'#AAAAAA'},
-'Skeleton':{hp:80,mp:0,str:20,def:12,mag:0,spd:8,exp:55,gold:35,actions:['attack','attack','attack'],spells:[],icon:'S',color:'#EEEEEE'},
-'Lizardman':{hp:120,mp:0,str:25,def:18,mag:8,spd:10,exp:80,gold:50,actions:['attack','attack','attack'],spells:[],icon:'L',color:'#44AA44'},
-'Ogre':{hp:180,mp:0,str:30,def:22,mag:5,spd:6,exp:120,gold:80,actions:['attack','attack','special'],spells:[],icon:'O',color:'#AA6633'},
-'Harpy':{hp:100,mp:20,str:22,def:14,mag:15,spd:16,exp:100,gold:65,actions:['attack','magic','attack'],spells:['Thunder'],icon:'H',color:'#FFAAFF'},
-'Vampire':{hp:200,mp:30,str:28,def:20,mag:20,spd:14,exp:180,gold:120,actions:['attack','magic','drain'],spells:['Bio'],icon:'V',color:'#AA44AA'},
-'Troll':{hp:250,mp:0,str:35,def:28,mag:5,spd:5,exp:200,gold:150,actions:['attack','attack','special'],spells:[],icon:'T',color:'#558855'},
-'Wyvern':{hp:320,mp:40,str:40,def:30,mag:25,spd:12,exp:280,gold:200,actions:['attack','magic','special'],spells:['Fire'],icon:'W',color:'#FF8844'},
-'Lich':{hp:450,mp:80,str:35,def:25,mag:45,spd:10,exp:500,gold:400,boss:true,actions:['magic','magic','attack','special'],spells:['Blizzaga','Thundaga','Bio'],icon:'L',color:'#8888FF'},
-'Marilith':{hp:600,mp:60,str:50,def:35,mag:35,spd:15,exp:700,gold:500,boss:true,actions:['attack','attack','magic','special'],spells:['Firaga'],icon:'M',color:'#FF4444'},
-'Kraken':{hp:800,mp:70,str:55,def:40,mag:40,spd:8,exp:900,gold:600,boss:true,actions:['attack','magic','attack','special'],spells:['Blizzaga'],icon:'K',color:'#4444FF'},
-'Tiamat':{hp:1000,mp:80,str:60,def:45,mag:50,spd:12,exp:1200,gold:800,boss:true,actions:['magic','attack','magic','special'],spells:['Thundaga','Meteor'],icon:'T',color:'#AA44FF'},
-'Chaos':{hp:2000,mp:100,str:70,def:50,mag:60,spd:14,exp:5000,gold:2000,boss:true,actions:['magic','attack','special','magic'],spells:['Meteor','Thundaga','Firaga'],icon:'C',color:'#FF0000'}
-};
-const ENCOUNTERS={grass:['Goblin','Goblin','Wolf','Imp','Goblin'],forest:['Lizardman','Wolf','Harpy','Skeleton','Goblin'],cave:['Skeleton','Vampire','Troll','Ogre','Harpy'],dungeon:['Vampire','Wyvern','Troll'],mountain:['Ogre','Harpy','Wyvern','Wolf'],sand:['Goblin','Lizardman','Wolf','Harpy']};
-
-// BATTLE STATE
-let btl={enemies:[],phase:'select',selMember:0,selAction:null,selTarget:-1,selSpell:0,selItem:0,menu:'main',log:[],particles:[],animTimer:0,turnOrder:[],turnIdx:0,bgColor:'#000820'};
-function mkEnemy(name){const t=ENEMIES[name];return{...JSON.parse(JSON.stringify(t)),maxHp:t.hp,maxMp:t.mp||0,displayName:name,dead:false,statusEffects:[]};}
-function getAlive(){return party.findIndex(m=>m.alive&&m.hp>0);}
-function bLog(msg){btl.log.push(msg);if(btl.log.length>5)btl.log.shift();}
-function mkParticles(x,y,color,n){for(let i=0;i<n;i++)btl.particles.push({x,y,vx:(Math.random()-0.5)*7,vy:(Math.random()-0.8)*9,life:1,decay:0.04+Math.random()*0.03,color,sz:2+Math.random()*5});}
-function updParticles(){btl.particles=btl.particles.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.3;p.life-=p.decay;return p.life>0;});}
-function startBattle(area){
-const tbl=ENCOUNTERS[area]||ENCOUNTERS.grass;
-const cnt=1+Math.floor(Math.random()*3);
-btl.enemies=[];
-const used={};
-for(let i=0;i<Math.min(cnt,4);i++){
-const n=tbl[Math.floor(Math.random()*tbl.length)];
-used[n]=(used[n]||0)+1;
-const e=mkEnemy(n);
-if(used[n]>1)e.displayName=n+' '+(used[n]);
-btl.enemies.push(e);
-}
-btl.phase='select';btl.selMember=getAlive();btl.menu='main';btl.log=['A battle begins!'];btl.particles=[];
-btl.bgColor=area==='dungeon'?'#0A0005':area==='cave'?'#050A00':'#000820';
-gameState=STATES.BATTLE;
-}
-function calcDmg(atk,spName){
-if(spName){const sp=SPELLS[spName];const base=sp.dmgMin+Math.random()*(sp.dmgMax-sp.dmgMin);return Math.floor(base*(1+(atk.mag||10)*0.05));}
-const s=atk.str||10;return Math.max(1,Math.floor(s*1.8+Math.random()*s*0.6));
-}
-function applyDmg(tgt,dmg,heal){
-if(heal){tgt.hp=Math.min(tgt.maxHp,tgt.hp+dmg);return dmg;}
-const red=Math.floor((tgt.def||0)/3);
-const actual=Math.max(1,dmg-red);
-tgt.hp=Math.max(0,tgt.hp-actual);
-if(tgt.hp<=0){if('alive'in tgt)tgt.alive=false;else tgt.dead=true;}
-return actual;
-}
-
-function doPlayerAction(mbr,action,tgt,spName,itemName){
-let msg='',color=COL.RED;
-if(action==='attack'){
-const d=calcDmg(mbr);const a=applyDmg(tgt,d,false);
-msg=mbr.name+' attacks '+tgt.displayName+'! '+a+' dmg!';
-mkParticles(560+btl.enemies.indexOf(tgt)*90,280,COL.RED,10);
-if(tgt.dead)msg+=' KO!';
-}else if(action==='magic'&&spName){
-const sp=SPELLS[spName];if(!sp)return 'No spell!';
-if(mbr.mp<sp.mp)return 'Not enough MP!';
-mbr.mp-=sp.mp;color=sp.color||COL.BLUE;
-if(sp.type==='heal'){const h=Math.floor(sp.dmgMin+Math.random()*(sp.dmgMax-sp.dmgMin));const a=applyDmg(tgt,h,true);msg=mbr.name+' casts '+spName+'! '+tgt.name+' +'+a+' HP!';mkParticles(140+party.indexOf(tgt)*150,350,color,12);}
-else if(sp.type==='revive'){tgt.alive=true;tgt.hp=Math.max(1,Math.floor(tgt.maxHp*0.3));msg=mbr.name+' casts '+spName+'! '+tgt.name+' revived!';mkParticles(140+party.indexOf(tgt)*150,350,'#FFFFFF',20);}
-else if(sp.type==='drain'){const d=calcDmg(mbr,spName);const a=applyDmg(tgt,d,false);mbr.hp=Math.min(mbr.maxHp,mbr.hp+(a>>1));msg=mbr.name+' drains '+tgt.displayName+'! '+a+' stolen!';mkParticles(560+btl.enemies.indexOf(tgt)*90,280,color,12);}
-else if(sp.tgt==='all'){let tot=0;btl.enemies.forEach(e=>{if(!e.dead){const d=calcDmg(mbr,spName);const a=applyDmg(e,d,false);tot+=a;}});msg=mbr.name+' casts '+spName+'! ~'+(tot/(btl.enemies.length||1)|0)+' avg dmg!';mkParticles(500,250,color,25);}
-else{const d=calcDmg(mbr,spName);const a=applyDmg(tgt,d,false);msg=mbr.name+' casts '+spName+'! '+tgt.displayName+' '+a+' dmg!';mkParticles(560+btl.enemies.indexOf(tgt)*90,280,color,15);if(tgt.dead)msg+=' KO!';}
-}else if(action==='item'){
-const itm=inventory.items.find(i=>i.name===itemName);if(!itm||itm.qty<=0)return 'No items!';
-itm.qty--;if(itm.qty<=0)inventory.items=inventory.items.filter(i=>i.qty>0);
-if(itm.effect==='heal'){const a=applyDmg(tgt,itm.value,true);msg=mbr.name+' uses '+itemName+'! '+tgt.name+' +'+a+' HP!';}
-else if(itm.effect==='mp'){tgt.mp=Math.min(tgt.maxMp,tgt.mp+itm.value);msg=mbr.name+' uses '+itemName+'! '+tgt.name+' +'+itm.value+' MP!';}
-else if(itm.effect==='revive'){tgt.alive=true;tgt.hp=Math.max(1,Math.floor(tgt.maxHp*0.3));msg=mbr.name+' uses '+itemName+'! '+tgt.name+' revived!';}
-else if(itm.effect==='elixir'){tgt.hp=tgt.maxHp;tgt.mp=tgt.maxMp;msg=mbr.name+' uses '+itemName+'! '+tgt.name+' fully restored!';}
-else if(itm.effect==='cure_poison'){tgt.statusEffects=(tgt.statusEffects||[]).filter(s=>s!=='poison');msg=mbr.name+' uses '+itemName+'! '+tgt.name+' cured!';}
-else if(itm.effect==='rest'){party.forEach(m=>{if(m.alive){m.hp=Math.min(m.maxHp,m.hp+150);m.mp=Math.min(m.maxMp,m.mp+40);}});msg='The party rests and recovers!';}
-mkParticles(140+party.indexOf(tgt)*150,350,COL.GREEN,10);
-}
-bLog(msg);return msg;
-}
-function doEnemyTurn(enemy){
-const alive=party.filter(m=>m.alive&&m.hp>0);if(alive.length===0)return;
-const tgt=alive[Math.floor(Math.random()*alive.length)];
-const acts=enemy.actions||['attack'];
-let act=acts[Math.floor(Math.random()*acts.length)];
-if(act==='magic'&&(!enemy.spells||!enemy.spells.length||enemy.mp<5))act='attack';
-let msg='';
-if(act==='magic'&&enemy.spells&&enemy.spells.length){
-const sn=enemy.spells[Math.floor(Math.random()*enemy.spells.length)];
-const sp=SPELLS[sn];if(enemy.mp>=sp.mp){
-enemy.mp-=sp.mp;
-if(sp.tgt==='all'){party.forEach(m=>{if(m.alive){const d=calcDmg(enemy,sn);const a=applyDmg(m,d,false);}});msg=enemy.displayName+' casts '+sn+'! Party hit!';}
-else{const d=calcDmg(enemy,sn);const a=applyDmg(tgt,d,false);msg=enemy.displayName+' casts '+sn+'! '+tgt.name+' '+a+' dmg!';if(!tgt.alive)msg+=' KO!';mkParticles(140+party.indexOf(tgt)*150,350,sp.color||'#FF00FF',12);}
-}else act='attack';
-}
-if(act==='drain'){const d=calcDmg(enemy);const a=applyDmg(tgt,d,false);enemy.hp=Math.min(enemy.maxHp,enemy.hp+(a>>1));msg=enemy.displayName+' drains '+tgt.name+'! '+a+' HP!';}
-else if(act==='special'){const d=Math.floor(calcDmg(enemy)*1.6);const a=applyDmg(tgt,d,false);msg=enemy.displayName+' uses special on '+tgt.name+'! '+a+' dmg!';if(!tgt.alive)msg+=' KO!';mkParticles(140+party.indexOf(tgt)*150,350,COL.ORANGE,15);}
-else if(act==='attack'){const d=calcDmg(enemy);const a=applyDmg(tgt,d,false);msg=enemy.displayName+' attacks '+tgt.name+'! '+a+' dmg!';if(!tgt.alive)msg+=' KO!';mkParticles(140+party.indexOf(tgt)*150,350,COL.RED,8);}
-bLog(msg);
-}
-
-function checkBattleEnd(){
-const allDead=btl.enemies.every(e=>e.dead);
-const partyDead=party.every(m=>!m.alive||m.hp<=0);
-if(allDead){
-let exp=0,gold=0;btl.enemies.forEach(e=>{exp+=e.exp;gold+=e.gold;});
-inventory.gold+=gold;bLog('Victory! +'+exp+' EXP +'+gold+' Gil!');
-let lvl=false;
-party.forEach(m=>{if(m.alive){m.exp+=exp;while(m.exp>=m.expNext){lvl=true;levelUp(m);}}});
-btl.phase='victory';
-setTimeout(()=>{gameState=lvl?STATES.LEVELUP:STATES.WORLD;},1800);
-return 'win';
-}
-if(partyDead){btl.phase='defeat';setTimeout(()=>{gameState=STATES.GAMEOVER;},1800);return 'lose';}
-return null;
-}
-function levelUp(m){
-m.exp-=m.expNext;m.level++;m.expNext=Math.floor(m.expNext*1.4);
-const hg=12+Math.floor(Math.random()*18),mg=m.maxMp>0?4+Math.floor(Math.random()*7):0;
-m.maxHp+=hg;m.hp=m.maxHp;m.maxMp+=mg;m.mp=m.maxMp;
-m.str+=Math.floor(Math.random()*3);m.def+=Math.floor(Math.random()*2);
-m.mag+=Math.floor(Math.random()*3);m.spd+=Math.floor(Math.random()*2);
-const learnT={'Black Mage':{3:['Fira','Blizzara'],5:['Thundara'],7:['Firaga'],9:['Blizzaga','Drain'],11:['Thundaga'],13:['Quake','Bio'],15:['Meteor']},'White Mage':{3:['Cura','Protect'],5:['Shell'],7:['Haste','Esuna'],9:['Curaga'],11:['Life'],13:['Holy']}};
-const tbl=learnT[m.cls];if(tbl&&tbl[m.level])tbl[m.level].forEach(s=>{if(!m.spells.includes(s))m.spells.push(s);});
-bLog(m.name+' reached Lv '+m.level+'!');
-}
-// BATTLE INPUT
-let btlActionQueue=[];
-let btlActTimer=0;
-function handleBattleInput(){
-if(btl.phase==='victory'||btl.phase==='defeat')return;
-if(btlActionQueue.length>0){
-btlActTimer++;
-if(btlActTimer>45){btlActTimer=0;processNextAction();}
-return;
-}
-if(btl.phase==='enemy'){processEnemyTurns();return;}
-// Player selection
-if(justPressed['ArrowUp']){if(btl.menu==='main')btl.selAction=Math.max(0,(btl.selAction||0)-1);else if(btl.menu==='target_e')btl.selTarget=Math.max(0,btl.selTarget-1);else if(btl.menu==='target_p')btl.selTarget=Math.max(0,btl.selTarget-1);else if(btl.menu==='spell')btl.selSpell=Math.max(0,btl.selSpell-1);else if(btl.menu==='item')btl.selItem=Math.max(0,btl.selItem-1);}
-if(justPressed['ArrowDown']){if(btl.menu==='main')btl.selAction=Math.min(3,(btl.selAction||0)+1);else if(btl.menu==='target_e')btl.selTarget=Math.min(btl.enemies.filter(e=>!e.dead).length-1,btl.selTarget+1);else if(btl.menu==='target_p')btl.selTarget=Math.min(party.filter(m=>m.alive).length-1,btl.selTarget+1);else if(btl.menu==='spell')btl.selSpell=Math.min((party[btl.selMember].spells.length||1)-1,btl.selSpell+1);else if(btl.menu==='item')btl.selItem=Math.min(Math.max(0,inventory.items.length-1),btl.selItem+1);}
-if(justPressed['KeyZ']||justPressed['Enter']||justPressed['Space']){
-const mbr=party[btl.selMember];
-if(btl.menu==='main'){
-btl.selAction=btl.selAction||0;
-const actions=['attack','magic','item','flee'];
-const chosen=actions[btl.selAction];
-if(chosen==='attack'){btl.menu='target_e';btl.selTarget=0;const alive=btl.enemies.filter(e=>!e.dead);btl.selTarget=alive.indexOf(alive[0]);}
-else if(chosen==='magic'){if(mbr.spells.length>0){btl.menu='spell';btl.selSpell=0;}else bLog('No spells!');}
-else if(chosen==='item'){if(inventory.items.length>0){btl.menu='item';btl.selItem=0;}else bLog('No items!');}
-else if(chosen==='flee'){const flee=Math.random()>0.45;if(flee){bLog('Fled successfully!');setTimeout(()=>{gameState=STATES.WORLD;},1000);}else bLog('Could not escape!');btl.menu='main';}
-}else if(btl.menu==='target_e'){
-const alive=btl.enemies.filter(e=>!e.dead);
-if(alive.length>0){const tgt=alive[Math.min(btl.selTarget,alive.length-1)];
-const msg=doPlayerAction(mbr,'attack',tgt,null,null);
-if(msg!=='No items!'&&msg!=='No spells!'){checkBattleEnd();advanceTurn();}
-btl.menu='main';}
-}else if(btl.menu==='spell'){
-const spName=mbr.spells[btl.selSpell];
-const sp=SPELLS[spName];if(!sp){btl.menu='main';return;}
-if(sp.tgt==='all'||sp.type==='buff'){
-doPlayerAction(mbr,'magic',party[0],spName,null);
-checkBattleEnd();advanceTurn();btl.menu='main';
-}else if(sp.type==='heal'||sp.type==='revive'){btl.menu='target_p';btl.selTarget=0;btl.pendingSpell=spName;}
-else{btl.menu='target_e2';btl.selTarget=0;btl.pendingSpell=spName;}
-}else if(btl.menu==='target_e2'){
-const alive=btl.enemies.filter(e=>!e.dead);
-if(alive.length>0){const tgt=alive[Math.min(btl.selTarget,alive.length-1)];
-doPlayerAction(mbr,'magic',tgt,btl.pendingSpell,null);checkBattleEnd();advanceTurn();}
-btl.menu='main';
-}else if(btl.menu==='target_p'){
-const al=party.filter(m=>m.alive||(SPELLS[btl.pendingSpell]?.type==='revive'&&!m.alive));
-if(al.length>0){const tgt=al[Math.min(btl.selTarget,al.length-1)];
-doPlayerAction(mbr,'magic',tgt,btl.pendingSpell,null);checkBattleEnd();advanceTurn();}
-btl.menu='main';
-}else if(btl.menu==='item'){
-const itm=inventory.items[btl.selItem];if(!itm){btl.menu='main';return;}
-if(itm.effect==='revive'||itm.effect==='heal'||itm.effect==='mp'||itm.effect==='elixir'||itm.effect==='cure_poison'){btl.menu='target_p2';btl.pendingItem=itm.name;}
-else{doPlayerAction(mbr,'item',mbr,null,itm.name);checkBattleEnd();advanceTurn();btl.menu='main';}
-}else if(btl.menu==='target_p2'){
-const al=party;const tgt=al[Math.min(btl.selTarget,al.length-1)];
-doPlayerAction(mbr,'item',tgt,null,btl.pendingItem);checkBattleEnd();advanceTurn();btl.menu='main';
-}
-}
-if(justPressed['KeyX']||justPressed['Escape']){if(btl.menu!=='main')btl.menu='main';}
-}
-function advanceTurn(){
-btl.selMember++;
-if(btl.selMember>=party.length)btl.selMember=0;
-// Find next alive party member or switch to enemy phase
-let tries=0;
-while(tries<4&&(!party[btl.selMember].alive||party[btl.selMember].hp<=0)){btl.selMember=(btl.selMember+1)%party.length;tries++;}
-if(tries>=4||party.filter(m=>m.alive).every(m=>m.hp<=0)){btl.phase='enemy';processEnemyTurns();}
-else btl.phase='select';
-}
-function processEnemyTurns(){
-const al=btl.enemies.filter(e=>!e.dead);
-al.forEach(e=>doEnemyTurn(e));
-checkBattleEnd();
-btl.selMember=getAlive();btl.phase='select';btl.menu='main';
-}
-
-// DRAWING FUNCTIONS
-function dText(t,x,y,c,s){ctx.fillStyle=c||'#FFF';ctx.font=(s||14)+'px "Courier New"';ctx.fillText(t,x,y);}
-function dTextC(t,x,y,c,s){ctx.font=(s||14)+'px "Courier New"';ctx.textAlign='center';ctx.fillStyle=c||'#FFF';ctx.fillText(t,x,y);ctx.textAlign='left';}
-function dBox(x,y,w,h,fill,border){
-ctx.fillStyle=fill||'rgba(5,5,25,0.97)';ctx.fillRect(x,y,w,h);
-ctx.strokeStyle=border||'#4466AA';ctx.lineWidth=2;ctx.strokeRect(x+1,y+1,w-2,h-2);
-ctx.strokeStyle='#2244AA';ctx.lineWidth=1;ctx.strokeRect(x+3,y+3,w-6,h-6);
-const d=ctx;d.fillStyle='#6688CC';
-d.fillRect(x,y,5,5);d.fillRect(x+w-5,y,5,5);d.fillRect(x,y+h-5,5,5);d.fillRect(x+w-5,y+h-5,5,5);
-}
-function hpBar(x,y,w,hp,mx){const r=Math.max(0,hp/mx);ctx.fillStyle='#1A0000';ctx.fillRect(x,y,w,7);ctx.fillStyle=r>0.5?'#44FF44':r>0.25?'#FFAA00':'#FF2200';ctx.fillRect(x,y,Math.floor(w*r),7);ctx.strokeStyle='#335533';ctx.lineWidth=1;ctx.strokeRect(x,y,w,7);}
-function mpBar(x,y,w,mp,mx){if(!mx)return;const r=Math.max(0,mp/mx);ctx.fillStyle='#00001A';ctx.fillRect(x,y,w,7);ctx.fillStyle='#2266FF';ctx.fillRect(x,y,Math.floor(w*r),7);ctx.strokeStyle='#223355';ctx.lineWidth=1;ctx.strokeRect(x,y,w,7);}
-function expBar(x,y,w,e,en){const r=Math.min(1,e/en);ctx.fillStyle='#1A1A00';ctx.fillRect(x,y,w,5);ctx.fillStyle='#FFDD00';ctx.fillRect(x,y,Math.floor(w*r),5);ctx.strokeStyle='#555511';ctx.lineWidth=1;ctx.strokeRect(x,y,w,5);}
-
-// WORLD MAP DRAWING
-let steps=0,stepDir=0,walkAnim=0;
-function drawWorld(){
-const tileColors={[TILE.GRASS]:COL.GRASS,[TILE.WATER]:COL.WATER,[TILE.MOUNTAIN]:COL.MOUNTAIN,[TILE.FOREST]:COL.FOREST,[TILE.SAND]:COL.SAND,[TILE.TOWN]:COL.TOWN,[TILE.CAVE]:COL.CAVE,[TILE.DUNGEON]:COL.DUNGEON,[TILE.ROAD]:COL.ROAD,[TILE.SNOW]:COL.SNOW};
-const tileColors2={[TILE.GRASS]:COL.GRASS2,[TILE.WATER]:COL.WATER2,[TILE.MOUNTAIN]:COL.MOUNTAIN2};
-ctx.fillStyle='#000';ctx.fillRect(0,0,800,480);
-// Draw tiles
-for(let ty=0;ty<VTY+1;ty++){for(let tx=0;tx<VTX+1;tx++){
-const wx=tx+camX,wy=ty+camY;
-if(wx<0||wy<0||wx>=worldMap[0].length||wy>=worldMap.length)continue;
-const tile=worldMap[wy][wx];
-const sx=tx*TS,sy=ty*TS;
-// Base color
-ctx.fillStyle=tileColors[tile]||'#222';ctx.fillRect(sx,sy,TS,TS);
-// Tile details
-if(tile===TILE.WATER){ctx.fillStyle='rgba(50,100,200,0.3)';ctx.fillRect(sx,sy+((frame*2)%TS)/2,TS,4);}
-else if(tile===TILE.GRASS){ctx.fillStyle=COL.GRASS2;ctx.fillRect(sx,sy+TS-5,TS,5);}
-else if(tile===TILE.MOUNTAIN){ctx.fillStyle=COL.MOUNTAIN2;ctx.fillRect(sx+TS/4,sy,TS/2,TS*0.7|0);}
-else if(tile===TILE.FOREST){ctx.fillStyle='#0A2A0A';for(let i=0;i<3;i++)ctx.fillRect(sx+5+i*12,sy+5,8,TS-10);}
-else if(tile===TILE.SNOW){ctx.fillStyle='rgba(200,200,255,0.4)';ctx.fillRect(sx,sy,TS,TS/2|0);}
-else if(tile===TILE.TOWN){ctx.fillStyle='#CC9944';ctx.fillRect(sx+8,sy+5,TS-16,TS-12);}
-else if(tile===TILE.CAVE){ctx.fillStyle='#111';ctx.beginPath();ctx.arc(sx+TS/2,sy+TS/2,TS/3,0,Math.PI*2);ctx.fill();}
-else if(tile===TILE.DUNGEON){ctx.fillStyle='#111';ctx.fillRect(sx+5,sy+5,TS-10,TS-10);}
-else if(tile===TILE.ROAD){ctx.fillStyle='#AA9977';ctx.fillRect(sx+TS/3,sy,TS/3,TS);}
-// Grid shadow
-ctx.strokeStyle='rgba(0,0,0,0.15)';ctx.lineWidth=1;ctx.strokeRect(sx,sy,TS,TS);
-// Location names
-const loc=locations.find(l=>l.x===wx&&l.y===wy);
-if(loc){ctx.fillStyle='#FFFFFF';ctx.font='9px "Courier New"';ctx.textAlign='center';ctx.fillText(loc.name,sx+TS/2,sy+TS-3);ctx.textAlign='left';}
-}}
-// Draw player character
-const psx=(px-camX)*TS,psy=(py-camY)*TS;
-const bobY=Math.sin(walkAnim)*3;
-ctx.fillStyle='#FFFFFF';ctx.fillRect(psx+10,psy+2+bobY,20,20);// body
-ctx.fillStyle='#FFD700';ctx.fillRect(psx+12,psy+bobY,16,14);// head
-ctx.fillStyle='#4488FF';ctx.fillRect(psx+10,psy+14+bobY,20,12);// clothes
-ctx.fillStyle='#FFD700';ctx.fillRect(psx+8,psy+22+bobY,5,8);// left leg
-ctx.fillRect(psx+27,psy+22+bobY,5,8);// right leg
-}
-function drawHUD(){
-// Bottom HUD panel
-dBox(0,480,800,120,'rgba(3,3,15,0.98)','#4466AA');
-dText('Map: World of Crystal  |  Gold: '+inventory.gold+' Gil',10,498,'#CCDDFF',12);
-party.forEach((m,i)=>{
-const bx=10+i*195,by=508;
-dBox(bx,by,188,86,'rgba(5,5,20,0.9)',m.alive?'#4466AA':'#442222');
-ctx.fillStyle=m.alive?'#FFFFFF':'#AA6666';
-ctx.font='bold 12px "Courier New"';ctx.fillText(m.name,bx+8,by+16);
-ctx.font='10px "Courier New"';ctx.fillStyle='#AAAACC';ctx.fillText('Lv'+m.level+' '+m.cls,bx+8,by+28);
-dText('HP',bx+8,by+44,'#FF8888',11);hpBar(bx+28,by+36,120,m.hp,m.maxHp);dText(m.hp+'/'+m.maxHp,bx+155,by+44,'#FFFFFF',10);
-if(m.maxMp>0){dText('MP',bx+8,by+58,'#8888FF',11);mpBar(bx+28,by+50,120,m.mp,m.maxMp);dText(m.mp+'/'+m.maxMp,bx+155,by+58,'#AAAAFF',10);}
-if(!m.alive){ctx.fillStyle='rgba(150,0,0,0.4)';ctx.fillRect(bx+2,by+2,184,82);dText('KO',bx+85,by+47,'#FF4444',16);}
-expBar(bx+8,by+70,172,m.exp,m.expNext);dText('EXP',bx+8,by+84,'#FFDD44',10);
-});
-dText('Z/Enter:Confirm  X/Esc:Cancel  Arrow:Move/Select  M:Menu',10,594,'#445566',11);
-}
-
-// BATTLE RENDERING
-function drawBattle(){
-// Background
-const bg=ctx.createLinearGradient(0,0,0,480);
-bg.addColorStop(0,btl.bgColor);bg.addColorStop(1,'#000');
-ctx.fillStyle=bg;ctx.fillRect(0,0,800,480);
-// Ground line
-ctx.strokeStyle='#2244AA';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,380);ctx.lineTo(800,380);ctx.stroke();
-// Decorative lines
-for(let i=0;i<5;i++){ctx.strokeStyle='rgba(34,68,170,'+(0.3-i*0.05)+')';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,380+i*6);ctx.lineTo(800,380+i*6);ctx.stroke();}
-
-// Draw enemies
-btl.enemies.forEach((e,i)=>{
-if(e.dead)return;
-const ex=500+i*100,ey=200+Math.sin(frame*0.04+i*2)*5;
-// Enemy sprite (pixel art style)
-const ec=e.color||'#FFFFFF';
-ctx.fillStyle=e.boss?'transparent':'rgba(0,0,0,0.3)';
-if(!e.boss)ctx.fillRect(ex-30,ey+70,60,8);// shadow
-ctx.fillStyle=ec;
-if(e.icon==='G'){// Goblin
-ctx.fillRect(ex-15,ey+10,30,35);ctx.fillRect(ex-10,ey,20,15);
-ctx.fillStyle='#FF2222';ctx.fillRect(ex-6,ey+5,5,5);ctx.fillRect(ex+1,ey+5,5,5);
-ctx.fillStyle='#222';ctx.fillRect(ex-5,ey+12,3,4);ctx.fillRect(ex+2,ey+12,3,4);
-ctx.fillStyle=ec;ctx.fillRect(ex-22,ey+20,7,20);ctx.fillRect(ex+15,ey+20,7,20);
-}else if(e.icon==='S'){// Skeleton
-ctx.fillStyle='#E8E8D8';
-ctx.fillRect(ex-8,ey,16,16);ctx.fillRect(ex-6,ey+16,12,28);
-ctx.fillStyle='#333';ctx.fillRect(ex-5,ey+4,5,5);ctx.fillRect(ex+1,ey+4,5,5);ctx.fillRect(ex-4,ey+14,8,3);
-ctx.fillStyle='#E8E8D8';ctx.fillRect(ex-18,ey+18,8,25);ctx.fillRect(ex+10,ey+18,8,25);
-ctx.fillRect(ex-8,ey+44,8,20);ctx.fillRect(ex,ey+44,8,20);
-}else if(e.icon==='L'){// Boss/Lich
-ctx.fillStyle=ec;const sz=e.boss?50:30;
-ctx.fillRect(ex-sz/2,ey,sz,sz*1.8|0);
-ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(ex-sz/2+5,ey+10,sz-10,sz*0.5|0);
-for(let r=0;r<6;r++){ctx.fillStyle=ec;ctx.save();ctx.translate(ex,ey);ctx.rotate(r*Math.PI/3+frame*0.02);ctx.fillRect(-sz/2,0,sz,sz/6|0);ctx.restore();}
-}else{// Generic
-if(e.boss){
-ctx.fillStyle=ec;ctx.fillRect(ex-40,ey-10,80,90);
-ctx.fillStyle='rgba(255,255,255,0.3)';ctx.fillRect(ex-35,ey-5,70,20);
-ctx.fillStyle='#000';ctx.fillRect(ex-25,ey+10,15,15);ctx.fillRect(ex+10,ey+10,15,15);
-for(let h=0;h<4;h++){ctx.fillStyle=ec;ctx.save();ctx.translate(ex,ey-10);ctx.rotate(h*Math.PI/2+frame*0.025);ctx.fillRect(-45,-4,20,8);ctx.restore();}
-}else{
-ctx.fillRect(ex-20,ey+10,40,40);ctx.fillRect(ex-12,ey,24,15);
-ctx.fillStyle='#000';ctx.fillRect(ex-8,ey+5,6,6);ctx.fillRect(ex+2,ey+5,6,6);
-ctx.fillStyle=ec;ctx.fillRect(ex-28,ey+20,8,28);ctx.fillRect(ex+20,ey+20,8,28);
-}}
-// HP bar above enemy
-dBox(ex-40,ey-28,80,18,'rgba(0,0,0,0.8)','#333355');
-hpBar(ex-36,ey-22,72,e.hp,e.maxHp);
-dText(e.displayName,ex-38,ey-30,'#CCCCFF',9);
-});
-
-// Draw party members (simplified side view)
-party.forEach((m,i)=>{
-const px2=80+i*150,py2=310;
-if(!m.alive){ctx.globalAlpha=0.3;}
-ctx.fillStyle={'W':'#4488FF','M':'#AA44FF','H':'#44FF88','T':'#FFAA44'}[m.portrait]||'#FFFFFF';
-ctx.fillRect(px2-15,py2,30,40);ctx.fillRect(px2-10,py2-15,20,17);
-ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(px2-8,py2-10,7,7);ctx.fillRect(px2+1,py2-10,7,7);
-ctx.globalAlpha=1;
-if(m.alive&&i===btl.selMember&&(btl.phase==='select')){
-ctx.strokeStyle='#FFD700';ctx.lineWidth=2;ctx.strokeRect(px2-18,py2-18,36,62);
-}
-});
-
-// Particles
-btl.particles.forEach(p=>{ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.fillRect(p.x,p.y,p.sz,p.sz);});
-ctx.globalAlpha=1;
-
-// Battle UI
-drawBattleUI();
-}
-
-function drawBattleUI(){
-// Log box
-dBox(0,480,500,120,'rgba(3,3,15,0.97)','#4466AA');
-btl.log.slice(-4).forEach((l,i)=>dText(l,10,500+i*18,i===btl.log.length-1?'#FFFFFF':'#AAAACC',11));
-
-// Menu box
-const mbr=party[btl.selMember];
-if(btl.phase==='select'&&(btl.menu==='main')){
-dBox(500,480,300,120,'rgba(3,3,15,0.97)','#4466AA');
-dText(mbr.name+' - Lv '+mbr.level,510,496,'#CCDDFF',12);
-const acts=['Attack','Magic','Item','Flee'];
-acts.forEach((a,i)=>{const sel=i===(btl.selAction||0);dText((sel?'> ':' ')+a,510,514+i*22,sel?'#FFD700':'#CCCCFF',13);});
-}else if(btl.menu==='spell'||btl.menu==='target_e2'||btl.menu==='target_p'){
-dBox(490,380,310,220,'rgba(3,3,15,0.97)','#AA44FF');
-dText('-- MAGIC --',510,398,'#AA88FF',13);
-const spells=mbr.spells;
-spells.forEach((s,i)=>{
-const sp=SPELLS[s];const sel=i===btl.selSpell;
-dText((sel?'> ':' ')+s,510,416+i*18,sel?'#FFD700':'#CCCCFF',12);
-if(sp)dText((sp.mp||0)+' MP',660,416+i*18,'#8888FF',11);
-});
-if(btl.menu==='target_e2'){
-dText('Select Enemy:',510,398,'#FF8888',13);
-btl.enemies.filter(e=>!e.dead).forEach((e,i)=>dText((i===btl.selTarget?'>':' ')+e.displayName,510,416+i*20,i===btl.selTarget?'#FFD700':'#FFFFFF',12));
-}else if(btl.menu==='target_p'){
-dText('Select Ally:',510,398,'#44FF88',13);
-const al=party.filter(m=>m.alive||(SPELLS[btl.pendingSpell]?.type==='revive'));
-al.forEach((m,i)=>dText((i===btl.selTarget?'>':' ')+m.name+' '+m.hp+'/'+m.maxHp,510,416+i*20,i===btl.selTarget?'#FFD700':'#FFFFFF',12));
-}
-}else if(btl.menu==='item'||btl.menu==='target_p2'){
-dBox(490,360,310,240,'rgba(3,3,15,0.97)','#44FF88');
-dText('-- ITEMS --',510,378,'#88FF88',13);
-inventory.items.forEach((it,i)=>{const sel=i===btl.selItem;dText((sel?'> ':' ')+it.name+' x'+it.qty,510,396+i*19,sel?'#FFD700':'#CCCCFF',12);});
-if(btl.menu==='target_p2'){
-dText('Select Ally:',510,378,'#44FF88',13);
-party.forEach((m,i)=>dText((i===btl.selTarget?'>':' ')+m.name+' '+m.hp+'HP',510,396+i*20,i===btl.selTarget?'#FFD700':'#FFFFFF',12));
-}
-}else if(btl.menu==='target_e'){
-dBox(490,440,310,160,'rgba(3,3,15,0.97)','#FF4444');
-dText('Select Enemy:',510,458,'#FF8888',13);
-btl.enemies.filter(e=>!e.dead).forEach((e,i)=>{
-dText((i===btl.selTarget?'> ':' ')+e.displayName,510,476+i*20,i===btl.selTarget?'#FFD700':'#FFFFFF',12);
-dText(e.hp+'/'+e.maxHp,680,476+i*20,'#AAAAFF',11);
-});
-}
-// Party status during battle
-dBox(500,480,300,120,'rgba(3,3,15,0.97)');
-if(btl.menu==='main'){
-party.forEach((m,i)=>{
-const bx=500+i*73,by=490;
-dText(m.name.substring(0,5),bx+2,by+10,i===btl.selMember&&btl.phase==='select'?'#FFD700':'#CCCCFF',9);
-dText(m.hp,bx+2,by+22,m.hp<m.maxHp*0.25?'#FF4444':'#FFFFFF',9);
-hpBar(bx+2,by+25,68,m.hp,m.maxHp);
-if(!m.alive){ctx.fillStyle='rgba(150,0,0,0.5)';ctx.fillRect(bx,by,70,50);}
-});
-}
-}
-
-// TITLE SCREEN
-let titleFrame2=0,titleOpt=0;
-function drawTitle(){
-titleFrame2++;
-ctx.fillStyle='#000008';ctx.fillRect(0,0,800,600);
-// Stars
-for(let i=0;i<150;i++){const x=(i*137.5)%800,y=(i*83.7)%600;const tw=Math.sin(titleFrame2*0.05+i)*0.5+0.5;ctx.fillStyle='rgba(255,255,255,'+(0.2+tw*0.8)+')';ctx.fillRect(x,y,(i%5===0)?2:1,(i%5===0)?2:1);}
-// Crystals floating
-const cColors=['#4488FF','#FF44FF','#44FFFF','#FFAA44','#44FF88'];
-for(let c=0;c<5;c++){const cx=100+c*140,cy=100+Math.sin(titleFrame2*0.02+c*1.3)*20;ctx.save();ctx.translate(cx,cy);ctx.rotate(titleFrame2*0.01*(c%2?1:-1));ctx.strokeStyle=cColors[c];ctx.lineWidth=2;ctx.globalAlpha=0.7;ctx.beginPath();ctx.moveTo(0,-25);ctx.lineTo(14,0);ctx.lineTo(0,25);ctx.lineTo(-14,0);ctx.closePath();ctx.stroke();ctx.fillStyle=cColors[c];ctx.globalAlpha=0.15;ctx.fill();ctx.restore();ctx.globalAlpha=1;}
-// Title glow
-ctx.shadowBlur=30;ctx.shadowColor='#4488FF';
-ctx.fillStyle='rgba(30,50,150,0.3)';ctx.fillRect(120,130,560,130);
-ctx.shadowBlur=0;
-// Title text
-const p=Math.sin(titleFrame2*0.02)*0.05+0.95;
-ctx.save();ctx.translate(400,200);ctx.scale(p,p);ctx.textAlign='center';
-ctx.font='bold 58px "Courier New"';
-ctx.fillStyle='#000';ctx.fillText('CRYSTAL',2,2);ctx.fillText('CHRONICLES',2,62);
-const g=ctx.createLinearGradient(-200,-30,200,70);g.addColorStop(0,'#FFDD44');g.addColorStop(0.5,'#FFFFFF');g.addColorStop(1,'#FFAA00');
-ctx.fillStyle=g;ctx.fillText('CRYSTAL',0,0);ctx.fillText('CHRONICLES',0,60);
-ctx.font='18px "Courier New"';ctx.fillStyle='#AACCFF';ctx.fillText('~ A Final Fantasy Tribute ~',0,90);
-ctx.restore();ctx.textAlign='left';
-// Subtitle
-const sub='Heroes of Light, unite against the Fiends of Chaos!';const sidx=Math.floor(titleFrame2*0.04)%sub.length;
-ctx.fillStyle='#667799';ctx.font='13px "Courier New"';dTextC(sub.substring(0,sidx+1),400,310,'#667799',13);
-// Menu
-const opts=['NEW GAME','ABOUT / CONTROLS'];
-opts.forEach((o,i)=>{const sel=titleOpt===i;const oy=380+i*55;if(sel){dBox(270,oy-28,260,42);ctx.font='bold 18px "Courier New"';}else ctx.font='16px "Courier New"';dTextC((sel?'> ':' ')+o+(sel?' <':' '),400,oy,sel?'#FFD700':'#8899BB',18);});
-ctx.fillStyle='#445566';ctx.font='12px "Courier New"';dTextC('Arrow Keys: Navigate   Z / Enter: Select',400,550,'#445566',12);
-dTextC('Crystal Chronicles v1.0   Built with HTML5 Canvas',400,568,'#334455',11);
-}
-
-// MENU SCREEN (Field Menu)
-let menuCursor=0,menuPage=0;
-const menuTabs=['Status','Items','Magic','Equip','Save'];
-function drawMenu(){
-ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,800,600);
-dBox(0,0,800,600,'transparent','#4466AA');
-// Tab bar
-menuTabs.forEach((t,i)=>{const sel=menuCursor===i;dBox(5+i*158,5,152,35,sel?'rgba(40,60,120,0.9)':'rgba(5,5,25,0.8)',sel?'#AABBFF':'#4466AA');dTextC(t,5+i*158+76,27,sel?'#FFD700':'#AABBFF',14);});
-const tab=menuTabs[menuCursor];
-dBox(5,45,790,545,'rgba(3,3,15,0.9)','#4466AA');
-if(tab==='Status'){drawStatusTab();}
-else if(tab==='Items'){drawItemsTab();}
-else if(tab==='Magic'){drawMagicTab();}
-else if(tab==='Save'){drawSaveTab();}
-else{dTextC('Coming Soon!',400,300,'#AAAACC',20);}
-}
-let statusChar=0;
-function drawStatusTab(){
-const m=party[statusChar];
-dBox(15,55,380,525,'rgba(5,5,20,0.9)','#4466AA');
-dBox(405,55,380,525,'rgba(5,5,20,0.9)','#4466AA');
-// Left: char select
-party.forEach((c,i)=>{const sel=i===statusChar;dBox(20,65+i*120,370,115,sel?'rgba(20,30,70,0.9)':'rgba(5,5,20,0.6)',sel?'#AABBFF':'#4466AA');
-dText(c.name,35,85+i*120,sel?'#FFD700':'#FFFFFF',16);dText('Lv '+c.level+' '+c.cls,35,103+i*120,'#AAAACC',13);
-dText('HP:',35,120+i*120,'#FF8888',12);hpBar(60,111+i*120,200,c.hp,c.maxHp);dText(c.hp+'/'+c.maxHp,270,120+i*120,'#FFFFFF',12);
-if(c.maxMp>0){dText('MP:',35,138+i*120,'#8888FF',12);mpBar(60,130+i*120,200,c.mp,c.maxMp);dText(c.mp+'/'+c.maxMp,270,138+i*120,'#AAAAFF',12);}
-if(!c.alive){ctx.fillStyle='rgba(150,0,0,0.4)';ctx.fillRect(20,65+i*120,370,115);dText('KO',175,130+i*120,'#FF4444',18);}
-});
-// Right: stats
-dText('-- '+m.name+' --',425,75,'#FFD700',16);
-const stats=[['Lv',m.level],['EXP',m.exp+'/'+m.expNext],['STR',m.str],['DEF',m.def],['MAG',m.mag],['SPD',m.spd],['Weapon',m.weapon],['Armor',m.armor]];
-stats.forEach((s,i)=>{dText(s[0]+':',420,100+i*35,'#AACCFF',12);dText(''+s[1],545,100+i*35,'#FFFFFF',12);});
-dText('EXP to next:',420,395,'#FFDD44',12);expBar(420,400,360,m.exp,m.expNext);
-}
-let itemCursor=0,itemSel=-1;
-function drawItemsTab(){
-dText('-- ITEMS  (Gold: '+inventory.gold+' Gil) --',20,68,'#FFD700',14);
-if(inventory.items.length===0){dTextC('No items!',400,300,'#AAAACC',18);return;}
-inventory.items.forEach((it,i)=>{const sel=i===itemCursor;dBox(15,85+i*40,770,36,sel?'rgba(20,40,80,0.9)':'rgba(5,5,25,0.6)',sel?'#AABBFF':'#4466AA');
-dText(it.name,30,108+i*40,sel?'#FFD700':'#FFFFFF',14);dText('x'+it.qty,200,108+i*40,'#AAAACC',13);dText(it.desc,250,108+i*40,'#CCCCAA',12);});
-if(inventory.items[itemCursor])dText('Selected: '+inventory.items[itemCursor].desc,20,570,'#AACCFF',13);
-}
-let magicChar=0;
-function drawMagicTab(){
-// Char select
-party.forEach((m,i)=>{const sel=i===magicChar;dBox(5+i*198,55,193,45,sel?'rgba(20,30,80,0.9)':'rgba(5,5,25,0.6)',sel?'#AA88FF':'#4466AA');dText((sel?'> ':' ')+m.name,15+i*198,82,sel?'#FFD700':'#FFFFFF',14);});
-const m=party[magicChar];dText('-- '+m.name+"'s Spells --",20,115,'#AA88FF',14);
-if(m.spells.length===0){dText('No spells learned.',30,140,'#AAAACC',13);}
-m.spells.forEach((s,i)=>{const sp=SPELLS[s];if(!sp)return;const x=20+(i%3)*260,y=140+Math.floor(i/3)*50;dBox(x,y,250,42,'rgba(5,5,25,0.7)','#AA44FF');dText(s,x+10,y+16,'#CCAAFF',13);dText((sp.mp||0)+' MP',x+160,y+16,'#8888FF',12);dText(sp.type==='heal'?'Heal':sp.type==='magic'?'Elem':sp.type,x+10,y+33,'#888899',11);});
-}
-function drawSaveTab(){
-dTextC('-- SAVE GAME --',400,100,'#FFD700',18);
-dBox(200,130,400,80,'rgba(5,5,20,0.9)','#AABBFF');dText('Your progress is auto-saved',220,165,'#FFFFFF',14);dText('to your browser's local storage.',220,183,'#AAAACC',12);
-dBox(200,225,400,40);dTextC('Save to LocalStorage',400,250,'#44FF88',14);
-dBox(200,275,400,40);dTextC('Load from LocalStorage',400,300,'#FFAA44',14);
-dText('Party Level: '+Math.round(party.reduce((s,m)=>s+m.level,0)/party.length),220,360,'#CCDDFF',14);
-dText('Total Gold: '+inventory.gold+' Gil',220,380,'#FFD700',14);
-}
-
-// SHOP SYSTEM
-let shopLoc=null,shopCursor=0,shopMode='buy';
-function openShop(loc){shopLoc=loc;shopCursor=0;shopMode='buy';gameState=STATES.SHOP;}
-function drawShop(){
-ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,0,800,600);
-dBox(50,30,700,540,'rgba(3,3,15,0.97)','#AA8833');
-dTextC('~~ ITEM SHOP: '+shopLoc.name+' ~~',400,58,'#FFD700',18);
-dTextC('Gold: '+inventory.gold+' Gil',400,80,'#FFDD88',14);
-// Mode tabs
-dBox(60,90,160,35,shopMode==='buy'?'rgba(20,40,10,0.9)':'rgba(5,5,15,0.6)',shopMode==='buy'?'#44FF88':'#4466AA');
-dBox(230,90,160,35,shopMode==='sell'?'rgba(20,40,10,0.9)':'rgba(5,5,15,0.6)',shopMode==='sell'?'#44FF88':'#4466AA');
-dBox(400,90,160,35,shopMode==='inn'?'rgba(20,40,10,0.9)':'rgba(5,5,15,0.6)',shopMode==='inn'?'#44FF88':'#4466AA');
-dTextC('BUY',140,112,shopMode==='buy'?'#FFD700':'#AAAACC',14);dTextC('SELL',310,112,shopMode==='sell'?'#FFD700':'#AAAACC',14);
-dTextC('INN',480,112,'#FF8844',14);
-if(shopMode==='buy'){
-dText('-- Items for Sale --',70,148,'#CCDDAA',13);
-shopLoc.shopItems.forEach((name,i)=>{
-const sel=i===shopCursor;
-dBox(60,160+i*45,680,40,sel?'rgba(30,50,10,0.9)':'rgba(5,5,15,0.6)',sel?'#44FF88':'#4466AA');
-const cost=ITEM_COSTS[name]||99;
-const owned=inventory.items.find(it=>it.name===name);
-dText(name,80,183+i*45,sel?'#FFD700':'#FFFFFF',14);
-dText(cost+' Gil',300,183+i*45,'#FFDD44',13);
-dText('Owned: '+(owned?owned.qty:0),450,183+i*45,'#AAAACC',12);
-});
-dText('Z: Buy   X: Cancel   Arrows: Select',70,560,'#557744',13);
-}else if(shopMode==='inn'){
-dBox(150,200,500,200,'rgba(5,5,20,0.9)','#FF8844');
-dTextC('Rest at the Inn?',400,240,'#FFFFFF',18);dTextC('Cost: '+shopLoc.innCost+' Gil',400,270,'#FFDD44',16);
-dTextC('Restores full HP and MP for all!',400,300,'#AACCAA',14);
-dBox(175,330,200,50);dTextC('Rest (Z)',275,360,'#44FF88',16);
-dBox(425,330,200,50);dTextC('Leave (X)',525,360,'#FF4444',16);
-}else{dTextC('No items to sell yet.',400,300,'#AAAACC',16);}
-}
-function handleShopInput(){
-if(justPressed['ArrowUp'])shopCursor=Math.max(0,shopCursor-1);
-if(justPressed['ArrowDown']){const max=shopMode==='buy'?shopLoc.shopItems.length-1:0;shopCursor=Math.min(max,shopCursor+1);}
-if(justPressed['ArrowLeft']||justPressed['ArrowRight']){const modes=['buy','sell','inn'];const idx=modes.indexOf(shopMode);shopMode=modes[(idx+1)%3];shopCursor=0;}
-if(justPressed['KeyZ']||justPressed['Enter']){
-if(shopMode==='buy'){
-const name=shopLoc.shopItems[shopCursor];const cost=ITEM_COSTS[name]||99;
-if(inventory.gold>=cost){inventory.gold-=cost;const ex=inventory.items.find(i=>i.name===name);if(ex)ex.qty++;else{const base={Potion:{effect:'heal',value:100},HiPotion:{effect:'heal',value:250},Ether:{effect:'mp',value:30},Antidote:{effect:'cure_poison',value:0},Tent:{effect:'rest',value:0},PhoenixDown:{effect:'revive',value:0},Elixir:{effect:'elixir',value:0},MegaPotion:{effect:'heal',value:500}};const b=base[name]||{effect:'heal',value:50};inventory.items.push({name,qty:1,type:'item',target:'single',cost,...b,desc:name});}}
-else bLog('Not enough gold!');
-}else if(shopMode==='inn'){
-if(inventory.gold>=shopLoc.innCost){inventory.gold-=shopLoc.innCost;party.forEach(m=>{if(m.alive){m.hp=m.maxHp;m.mp=m.maxMp;}});bLog('The party rested! HP and MP restored!');}
-else bLog('Not enough gold!');
-gameState=STATES.WORLD;
-}
-}
-if(justPressed['KeyX']||justPressed['Escape'])gameState=STATES.WORLD;
-}
-
-// GAME OVER & LEVEL UP SCREENS
-let lvlUpTimer=0,lvlUpData=[];
-function drawGameOver(){
-ctx.fillStyle='rgba(0,0,0,0.92)';ctx.fillRect(0,0,800,600);
-ctx.fillStyle='rgba(100,0,0,0.5)';ctx.fillRect(0,0,800,600);
-dTextC('GAME OVER',400,220,'#FF2222',52);
-dTextC('The party has been defeated...',400,300,'#AA4444',18);
-dTextC('Press Z to return to Title Screen',400,380,'#886666',15);
-}
-function drawLevelUp(){
-ctx.fillStyle='rgba(0,0,20,0.95)';ctx.fillRect(0,0,800,600);
-dBox(150,80,500,440,'rgba(5,5,30,0.97)','#FFD700');
-dTextC('~ LEVEL UP! ~',400,115,'#FFD700',22);
-lvlUpData.forEach((d,i)=>{
-dBox(170,140+i*100,460,90,'rgba(10,10,40,0.9)','#AABBFF');
-dText(d.name+' is now Level '+d.level+'!',185,163+i*100,'#FFFFFF',14);
-dText('+'+d.hpGain+' HP  +'+d.mpGain+' MP  +'+d.strGain+' STR',185,183+i*100,'#44FF88',13);
-if(d.newSpell)dText('Learned: '+d.newSpell+'!',185,200+i*100,'#AA44FF',13);
-});
-dTextC('Press Z to continue!',400,500,'#FFDD44',16);
-}
-function drawDialog(){
-dBox(100,350,600,200,'rgba(3,3,15,0.97)','#4466AA');
-dTextC(dialogText||'...',400,420,'#FFFFFF',16);
-dTextC('Z: Continue',400,500,'#AAAACC',13);
-}
-let dialogText='',dialogCallback=null;
-function showDialog(text,cb){dialogText=text;dialogCallback=cb;gameState=STATES.DIALOG;}
-
-// WORLD MAP MOVEMENT & ENCOUNTERS
-let frame=0,encSteps=0,encThreshold=15+Math.floor(Math.random()*10);
-let walkDir=0,walkAnim2=0;
-const walkableFrom={[TILE.GRASS]:true,[TILE.SAND]:true,[TILE.FOREST]:true,[TILE.ROAD]:true};
-const townTiles=[TILE.TOWN];const dungeonTiles=[TILE.CAVE,TILE.DUNGEON];
-function handleWorldInput(){
-if(justPressed['KeyM']||justPressed['KeyI']){menuCursor=0;prevState=gameState;gameState=STATES.MENU;return;}
-let nx=px,ny=py,moved=false,dir=0;
-if(keys['ArrowLeft']&&frame%8===0){nx--;dir=1;moved=true;}
-else if(keys['ArrowRight']&&frame%8===0){nx++;dir=2;moved=true;}
-else if(keys['ArrowUp']&&frame%8===0){ny--;dir=3;moved=true;}
-else if(keys['ArrowDown']&&frame%8===0){ny++;dir=4;moved=true;}
-if(moved){
-if(nx<0||ny<0||nx>=worldMap[0].length||ny>=worldMap.length)return;
-const tile=worldMap[ny][nx];
-if(tile===TILE.MOUNTAIN||tile===TILE.WATER)return;
-// Check for town/dungeon entry
-const loc=locations.find(l=>l.x===nx&&l.y===ny);
-if(loc){
-if(loc.type==='town'){openShop(loc);px=nx;py=ny;return;}
-else if(loc.type==='cave'||loc.type==='dungeon'){
-showDialog('Entering '+loc.name+'...',null);
-px=nx;py=ny;
-setTimeout(()=>{const area=loc.type==='dungeon'?'dungeon':'cave';startBattle(area);},500);
-return;
-}
-}
-px=nx;py=ny;walkAnim2+=0.5;
-// Update camera
-const halfX=Math.floor(VTX/2),halfY=Math.floor(VTY/2);
-camX=Math.max(0,Math.min(worldMap[0].length-VTX,px-halfX));
-camY=Math.max(0,Math.min(worldMap.length-VTY,py-halfY));
-// Random encounter
-const areaType=getTileArea(tile);
-if(areaType){
-encSteps++;
-if(encSteps>=encThreshold){
-encSteps=0;encThreshold=12+Math.floor(Math.random()*10);
-if(Math.random()<0.65)startBattle(areaType);
-}
-}
-}
-if(justPressed['KeyZ']||justPressed['Enter']){
-// Check adjacent locations
-const loc=locations.find(l=>l.x===px&&l.y===py);
-if(loc){if(loc.type==='town')openShop(loc);}
-}
-}
-function getTileArea(t){
-const m={[TILE.GRASS]:'grass',[TILE.FOREST]:'forest',[TILE.SAND]:'sand',[TILE.MOUNTAIN]:'mountain'};
-return m[t]||null;
-}
-
-// MENU INPUT HANDLING
-function handleMenuInput(){
-if(justPressed['ArrowLeft'])menuCursor=Math.max(0,menuCursor-1);
-if(justPressed['ArrowRight'])menuCursor=Math.min(menuTabs.length-1,menuCursor+1);
-if(menuTabs[menuCursor]==='Status'){if(justPressed['ArrowUp'])statusChar=Math.max(0,statusChar-1);if(justPressed['ArrowDown'])statusChar=Math.min(party.length-1,statusChar+1);}
-if(menuTabs[menuCursor]==='Items'){if(justPressed['ArrowUp'])itemCursor=Math.max(0,itemCursor-1);if(justPressed['ArrowDown'])itemCursor=Math.min(inventory.items.length-1,itemCursor+1);}
-if(menuTabs[menuCursor]==='Magic'){if(justPressed['ArrowUp'])magicChar=Math.max(0,magicChar-1);if(justPressed['ArrowDown'])magicChar=Math.min(party.length-1,magicChar+1);}
-if(menuTabs[menuCursor]==='Save'){
-if(justPressed['KeyZ']||justPressed['Enter']){
-const save={party:JSON.parse(JSON.stringify(party)),inventory:JSON.parse(JSON.stringify(inventory)),px,py};
-try{localStorage.setItem('crystalChronicles',JSON.stringify(save));alert('Game saved!');}catch(e){}
-}
-}
-if(justPressed['KeyX']||justPressed['Escape']||justPressed['KeyM'])gameState=prevState||STATES.WORLD;
-}
-// TITLE SCREEN INPUT
-function handleTitleInput(){
-if(justPressed['ArrowUp']||justPressed['ArrowLeft'])titleOpt=Math.max(0,titleOpt-1);
-if(justPressed['ArrowDown']||justPressed['ArrowRight'])titleOpt=Math.min(1,titleOpt+1);
-if(justPressed['KeyZ']||justPressed['Enter']||justPressed['Space']){
-if(titleOpt===0){
-// Load save if exists
-try{const s=localStorage.getItem('crystalChronicles');if(s){const d=JSON.parse(s);Object.assign(party,d.party);Object.assign(inventory,d.inventory);px=d.px||3;py=d.py||8;}}catch(e){}
-gameState=STATES.WORLD;
-}else{
-showDialog('Controls: Arrow Keys=Move/Select  Z/Enter=Confirm  X/Esc=Cancel  M/I=Menu | Explore the world, fight enemies, level up! Visit towns to buy items and rest at inns.',()=>{});
-}
-}
-}
-// LEVEL UP INPUT
-function handleLevelUpInput(){
-if(justPressed['KeyZ']||justPressed['Enter']||justPressed['Space']){gameState=STATES.WORLD;}
-}
-// GAMEOVER INPUT  
-function handleGameOverInput(){
-if(justPressed['KeyZ']||justPressed['Enter']){
-// Revive with 1 HP
-party.forEach(m=>{m.alive=true;m.hp=Math.max(1,Math.floor(m.maxHp*0.2));});
-gameState=STATES.TITLE;
-}
-}
-// DIALOG INPUT
-function handleDialogInput(){if(justPressed['KeyZ']||justPressed['Enter']){if(dialogCallback)dialogCallback();else gameState=prevState||STATES.WORLD;}}
-
-// MAIN GAME LOOP
-function update(){
-frame++;
-if(gameState===STATES.TITLE)handleTitleInput();
-else if(gameState===STATES.WORLD)handleWorldInput();
-else if(gameState===STATES.BATTLE){updParticles();handleBattleInput();}
-else if(gameState===STATES.MENU)handleMenuInput();
-else if(gameState===STATES.SHOP)handleShopInput();
-else if(gameState===STATES.LEVELUP)handleLevelUpInput();
-else if(gameState===STATES.GAMEOVER)handleGameOverInput();
-else if(gameState===STATES.DIALOG)handleDialogInput();
-clrJP();
-}
-function draw(){
-ctx.clearRect(0,0,800,600);
-if(gameState===STATES.TITLE)drawTitle();
-else if(gameState===STATES.WORLD){drawWorld();drawHUD();}
-else if(gameState===STATES.BATTLE)drawBattle();
-else if(gameState===STATES.MENU){drawWorld();drawHUD();drawMenu();}
-else if(gameState===STATES.SHOP)drawShop();
-else if(gameState===STATES.LEVELUP)drawLevelUp();
-else if(gameState===STATES.GAMEOVER)drawGameOver();
-else if(gameState===STATES.DIALOG){drawWorld();drawHUD();drawDialog();}
-}
-function gameLoop(){update();draw();requestAnimationFrame(gameLoop);}
-// Initialize camera
-const hxInit=Math.floor(VTX/2),hyInit=Math.floor(VTY/2);
-camX=Math.max(0,Math.min(worldMap[0].length-VTX,px-hxInit));
-camY=Math.max(0,Math.min(worldMap.length-VTY,py-hyInit));
-gameLoop();
+const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
+const STATES={T:0,W:1,B:2,M:3,GO:5,LU:7,SH:8,DI:4};
+let gs=STATES.T,ps=STATES.W;
+const keys={},jp={};
+document.addEventListener("keydown",e=>{if(!keys[e.code])jp[e.code]=true;keys[e.code]=true;e.preventDefault();});
+document.addEventListener("keyup",e=>{keys[e.code]=false;});
+function clr(){Object.keys(jp).forEach(k=>delete jp[k]);}
+const C={BK:"#000",WH:"#FFF",GD:"#FFD700",RD:"#FF4444",BL:"#4488FF",GR:"#44FF88",OR:"#FF8844",GRASS:"#2D5A1B",G2:"#1A3A0A",WATER:"#1144AA",W2:"#0A2A80",SAND:"#C8A84B",MTN:"#8B7355",M2:"#6B5335",FOREST:"#1A4A1A",ROAD:"#9B8365",TOWN:"#AA8833",CAVE:"#222"};
+const TI={GR:0,WA:1,MT:2,FO:3,SA:4,TO:5,CA:6,DU:7,RO:8,SN:9};
+const map=[[2,2,2,2,2,9,9,2,2,2,2,2,2,2,2,2,2,2,2,2],[2,9,9,9,2,2,9,2,0,0,0,0,0,2,2,2,2,2,0,2],[2,9,6,9,2,2,2,2,0,3,3,0,0,2,2,2,2,0,0,2],[2,2,2,2,2,2,2,0,0,3,3,3,0,0,0,2,2,0,5,2],[2,2,0,0,0,0,0,0,3,3,0,3,0,0,0,0,0,0,0,2],[2,0,0,5,0,0,0,0,3,0,0,0,0,0,0,0,0,5,0,2],[2,0,0,8,0,0,3,3,3,0,0,0,0,0,0,0,0,0,0,2],[2,0,8,8,8,0,3,3,0,0,0,5,0,0,4,4,4,0,0,2],[2,0,8,5,8,0,0,0,0,0,0,0,0,4,4,4,4,4,0,2],[2,0,8,0,8,0,0,0,0,1,1,0,0,4,4,1,1,0,0,2],[2,0,0,0,8,0,0,0,1,1,1,1,0,0,4,1,1,0,0,2],[2,0,0,0,8,8,0,0,1,1,1,1,1,0,0,0,0,0,0,2],[2,0,0,0,0,8,8,0,0,1,1,1,0,0,0,0,0,6,0,2],[2,0,0,0,0,0,8,8,8,7,0,0,0,0,0,0,0,0,0,2],[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]];
+const TS=40,VX=Math.floor(800/TS),VY=Math.floor(480/TS);
+const locs=[{x:3,y:5,name:"Cornelia",t:"town",s:["Potion","HiPotion","Antidote","Tent"],i:50},{x:11,y:7,name:"Pravoka",t:"town",s:["Potion","HiPotion","Ether","Tent","Elixir"],i:80},{x:17,y:5,name:"Elfheim",t:"town",s:["Elixir","Ether","HiPotion"],i:120},{x:17,y:3,name:"Crescent Lake",t:"town",s:["Elixir","MegaPotion","PhoenixDown"],i:150},{x:3,y:7,name:"Melmond",t:"town",s:["Potion","HiPotion","Ether","Elixir"],i:100},{x:2,y:2,name:"Ice Cave",t:"cave"},{x:17,y:12,name:"Marsh Cave",t:"cave"},{x:9,y:13,name:"Chaos Shrine",t:"dungeon"}];
+const party=[{name:"WARRIOR",cls:"Warrior",level:1,exp:0,expNext:100,hp:220,maxHp:220,mp:0,maxMp:0,str:18,def:15,mag:5,spd:10,weapon:"Iron Sword",armor:"Chain Mail",spells:[],alive:true,p:"W"},{name:"MAGE",cls:"Black Mage",level:1,exp:0,expNext:100,hp:120,maxHp:120,mp:30,maxMp:30,str:8,def:8,mag:18,spd:14,weapon:"Oak Staff",armor:"Cloth Robe",spells:["Fire","Blizzard","Thunder"],alive:true,p:"M"},{name:"HEALER",cls:"White Mage",level:1,exp:0,expNext:100,hp:150,maxHp:150,mp:35,maxMp:35,str:10,def:12,mag:16,spd:12,weapon:"Mage Staff",armor:"White Robe",spells:["Cure","Cura","Esuna","Life"],alive:true,p:"H"},{name:"THIEF",cls:"Thief",level:1,exp:0,expNext:100,hp:170,maxHp:170,mp:10,maxMp:10,str:14,def:10,mag:8,spd:18,weapon:"Iron Dagger",armor:"Light Armor",spells:[],alive:true,p:"T"}];
+const inv={gold:500,items:[{name:"Potion",qty:5,e:"heal",v:100,d:"Restores 100 HP",c:50},{name:"HiPotion",qty:2,e:"heal",v:250,d:"Restores 250 HP",c:150},{name:"Ether",qty:2,e:"mp",v:30,d:"Restores 30 MP",c:100},{name:"Antidote",qty:3,e:"cure_poison",v:0,d:"Cures Poison",c:40},{name:"Tent",qty:1,e:"rest",v:0,d:"Restore HP/MP",c:200},{name:"PhoenixDown",qty:1,e:"revive",v:0,d:"Revives KO ally",c:300}]};
+const IC={Potion:50,HiPotion:150,Ether:100,Antidote:40,Tent:200,PhoenixDown:300,Elixir:500,MegaPotion:300};
+let px=3,py=8,cx=0,cy=0;
+const SP={Fire:{mp:5,t:"magic",min:55,max:75,tg:"s",color:"#FF6600"},Fira:{mp:15,t:"magic",min:115,max:155,tg:"s",color:"#FF4400"},Firaga:{mp:30,t:"magic",min:240,max:320,tg:"s",color:"#FF2200"},Blizzard:{mp:5,t:"magic",min:55,max:75,tg:"s",color:"#88CCFF"},Blizzara:{mp:15,t:"magic",min:115,max:155,tg:"s",color:"#44AAFF"},Blizzaga:{mp:30,t:"magic",min:240,max:320,tg:"s",color:"#2266FF"},Thunder:{mp:5,t:"magic",min:55,max:75,tg:"s",color:"#FFFF44"},Thundara:{mp:15,t:"magic",min:115,max:155,tg:"s",color:"#FFDD00"},Thundaga:{mp:30,t:"magic",min:240,max:320,tg:"s",color:"#FFAA00"},Quake:{mp:28,t:"magic",min:180,max:240,tg:"a",color:"#AA8844"},Meteor:{mp:45,t:"magic",min:400,max:600,tg:"a",color:"#FF88FF"},Bio:{mp:20,t:"magic",min:100,max:150,tg:"s",color:"#88FF44"},Drain:{mp:18,t:"drain",min:80,max:120,tg:"s",color:"#AA44FF"},Cure:{mp:8,t:"heal",min:100,max:120,tg:"s",color:"#44FF88"},Cura:{mp:18,t:"heal",min:250,max:300,tg:"s",color:"#00FF66"},Curaga:{mp:35,t:"heal",min:600,max:700,tg:"s",color:"#00FFAA"},Esuna:{mp:10,t:"status",tg:"s",color:"#AAFFAA"},Life:{mp:25,t:"revive",tg:"s",color:"#FFFFFF"},Holy:{mp:40,t:"magic",min:350,max:500,tg:"s",color:"#FFFFCC"}};
+const EN={Goblin:{hp:45,mp:0,str:12,def:8,mag:4,spd:8,exp:30,gold:20,a:["attack","attack","attack"],sp:[],c:"#44FF44"},Imp:{hp:38,mp:8,str:10,def:6,mag:10,spd:12,exp:25,gold:15,a:["attack","magic","attack"],sp:["Fire"],c:"#FF44FF"},Wolf:{hp:60,mp:0,str:16,def:10,mag:4,spd:14,exp:40,gold:25,a:["attack","attack"],sp:[],c:"#AAAAAA"},Skeleton:{hp:80,mp:0,str:20,def:12,mag:0,spd:8,exp:55,gold:35,a:["attack","attack","attack"],sp:[],c:"#EEEEEE"},Lizardman:{hp:120,mp:0,str:25,def:18,mag:8,spd:10,exp:80,gold:50,a:["attack","attack","attack"],sp:[],c:"#44AA44"},Ogre:{hp:180,mp:0,str:30,def:22,mag:5,spd:6,exp:120,gold:80,a:["attack","attack","special"],sp:[],c:"#AA6633"},Harpy:{hp:100,mp:20,str:22,def:14,mag:15,spd:16,exp:100,gold:65,a:["attack","magic","attack"],sp:["Thunder"],c:"#FFAAFF"},Vampire:{hp:200,mp:30,str:28,def:20,mag:20,spd:14,exp:180,gold:120,a:["attack","magic","drain"],sp:["Bio"],c:"#AA44AA"},Troll:{hp:250,mp:0,str:35,def:28,mag:5,spd:5,exp:200,gold:150,a:["attack","attack","special"],sp:[],c:"#558855"},Wyvern:{hp:320,mp:40,str:40,def:30,mag:25,spd:12,exp:280,gold:200,a:["attack","magic","special"],sp:["Fire"],c:"#FF8844"},Lich:{hp:450,mp:80,str:35,def:25,mag:45,spd:10,exp:500,gold:400,boss:true,a:["magic","magic","attack","special"],sp:["Blizzaga","Thundaga","Bio"],c:"#8888FF"},Marilith:{hp:600,mp:60,str:50,def:35,mag:35,spd:15,exp:700,gold:500,boss:true,a:["attack","attack","magic","special"],sp:["Firaga"],c:"#FF4444"},Kraken:{hp:800,mp:70,str:55,def:40,mag:40,spd:8,exp:900,gold:600,boss:true,a:["attack","magic","attack","special"],sp:["Blizzaga"],c:"#4444FF"},Tiamat:{hp:1000,mp:80,str:60,def:45,mag:50,spd:12,exp:1200,gold:800,boss:true,a:["magic","attack","magic","special"],sp:["Thundaga","Meteor"],c:"#AA44FF"},Chaos:{hp:2000,mp:100,str:70,def:50,mag:60,spd:14,exp:5000,gold:2000,boss:true,a:["magic","attack","special","magic"],sp:["Meteor","Thundaga","Firaga"],c:"#FF0000"}};
+const ENC={grass:["Goblin","Wolf","Imp","Goblin"],forest:["Lizardman","Wolf","Harpy","Skeleton"],cave:["Skeleton","Vampire","Troll","Ogre"],dungeon:["Vampire","Wyvern","Troll"],sand:["Goblin","Lizardman","Wolf","Harpy"]};
+let b={enemies:[],phase:"select",selMbr:0,selAct:0,selTgt:0,selSp:0,selIt:0,menu:"main",log:[],pts:[],bg:"#000820",pSp:"",pIt:""};
+function mkE(n){const t=EN[n];return{...JSON.parse(JSON.stringify(t)),maxHp:t.hp,maxMp:t.mp||0,dn:n,dead:false};}
+function gAlive(){return party.findIndex(m=>m.alive&&m.hp>0);}
+function bLog(m){b.log.push(m);if(b.log.length>5)b.log.shift();}
+function mkP(x,y,col,n){for(let i=0;i<n;i++)b.pts.push({x,y,vx:(Math.random()-.5)*7,vy:(Math.random()-.8)*9,life:1,decay:.04+Math.random()*.03,col,sz:2+Math.random()*5});}
+function uP(){b.pts=b.pts.filter(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.3;p.life-=p.decay;return p.life>0;});}
+function startB(area){const tbl=ENC[area]||ENC.grass;const cnt=1+Math.floor(Math.random()*3);b.enemies=[];const used={};for(let i=0;i<Math.min(cnt,4);i++){const n=tbl[Math.floor(Math.random()*tbl.length)];used[n]=(used[n]||0)+1;const e=mkE(n);if(used[n]>1)e.dn=n+" "+used[n];b.enemies.push(e);}b.phase="select";b.selMbr=gAlive();b.menu="main";b.selAct=0;b.log=["A battle begins!"];b.pts=[];b.bg=area==="dungeon"?"#0A0005":area==="cave"?"#050A00":"#000820";gs=STATES.B;}
+function cD(atk,sp){if(sp){const s=SP[sp];if(!s)return 0;const base=s.min+Math.random()*(s.max-s.min);return Math.floor(base*(1+(atk.mag||10)*.05));}const s=atk.str||10;return Math.max(1,Math.floor(s*1.8+Math.random()*s*.6));}
+function aD(tgt,dmg,heal){if(heal){tgt.hp=Math.min(tgt.maxHp,tgt.hp+dmg);return dmg;}const red=Math.floor((tgt.def||0)/3);const a=Math.max(1,dmg-red);tgt.hp=Math.max(0,tgt.hp-a);if(tgt.hp<=0){"alive" in tgt?tgt.alive=false:tgt.dead=true;}return a;}
+function doPA(mbr,action,tgt,spN,itN){let msg="";
+if(action==="attack"){const d=cD(mbr);const a=aD(tgt,d,false);msg=mbr.name+" attacks "+tgt.dn+"! "+a+" dmg!";mkP(500+b.enemies.indexOf(tgt)*90,280,C.RD,10);if(tgt.dead)msg+=" KO!";}
+else if(action==="magic"&&spN){const sp=SP[spN];if(!sp)return "No spell!";if(mbr.mp<sp.mp)return "Not enough MP!";mbr.mp-=sp.mp;
+if(sp.t==="heal"){const h=Math.floor(sp.min+Math.random()*(sp.max-sp.min));const a=aD(tgt,h,true);msg=mbr.name+" casts "+spN+"! +"+a+" HP!";mkP(100+party.indexOf(tgt)*160,340,sp.color,12);}
+else if(sp.t==="revive"){tgt.alive=true;tgt.hp=Math.max(1,Math.floor(tgt.maxHp*.3));msg=mbr.name+" casts "+spN+"! "+tgt.name+" revived!";mkP(100+party.indexOf(tgt)*160,340,"#FFF",20);}
+else if(sp.t==="drain"){const d=cD(mbr,spN);const a=aD(tgt,d,false);mbr.hp=Math.min(mbr.maxHp,mbr.hp+(a>>1));msg=mbr.name+" drains "+tgt.dn+"! "+a+" stolen!";mkP(500+b.enemies.indexOf(tgt)*90,280,sp.color,12);}
+else if(sp.tg==="a"){let tot=0;b.enemies.forEach(e=>{if(!e.dead){const d=cD(mbr,spN);const a=aD(e,d,false);tot+=a;}});msg=mbr.name+" casts "+spN+"! ~"+(tot/(b.enemies.length||1)|0)+" avg dmg!";mkP(500,250,sp.color,25);}
+else{const d=cD(mbr,spN);const a=aD(tgt,d,false);msg=mbr.name+" casts "+spN+"! "+a+" dmg!";mkP(500+b.enemies.indexOf(tgt)*90,280,sp.color,15);if(tgt.dead)msg+=" KO!";}}
+else if(action==="item"){const it=inv.items.find(i=>i.name===itN);if(!it||it.qty<=0)return "No items!";it.qty--;if(it.qty<=0)inv.items=inv.items.filter(i=>i.qty>0);
+if(it.e==="heal"){const a=aD(tgt,it.v,true);msg=mbr.name+" uses "+itN+"! +"+a+" HP!";}
+else if(it.e==="mp"){tgt.mp=Math.min(tgt.maxMp,tgt.mp+it.v);msg=mbr.name+" uses "+itN+"! +"+it.v+" MP!";}
+else if(it.e==="revive"){tgt.alive=true;tgt.hp=Math.max(1,Math.floor(tgt.maxHp*.3));msg=mbr.name+" uses "+itN+"! Revived!";}
+else if(it.e==="elixir"){tgt.hp=tgt.maxHp;tgt.mp=tgt.maxMp;msg=mbr.name+" uses "+itN+"! Fully restored!";}
+else if(it.e==="cure_poison"){msg=mbr.name+" uses "+itN+"! Cured!";}
+else if(it.e==="rest"){party.forEach(m=>{if(m.alive){m.hp=Math.min(m.maxHp,m.hp+150);m.mp=Math.min(m.maxMp,m.mp+40);}});msg="The party rests!";}
+mkP(100+party.indexOf(tgt)*160,340,C.GR,10);}
+bLog(msg);return msg;}
+function doET(e){const al=party.filter(m=>m.alive&&m.hp>0);if(!al.length)return;const tgt=al[Math.floor(Math.random()*al.length)];const acts=e.a||["attack"];let act=acts[Math.floor(Math.random()*acts.length)];if(act==="magic"&&(!e.sp||!e.sp.length||e.mp<5))act="attack";let msg="";
+if(act==="magic"&&e.sp&&e.sp.length){const sn=e.sp[Math.floor(Math.random()*e.sp.length)];const sp=SP[sn];if(sp&&e.mp>=sp.mp){e.mp-=sp.mp;if(sp.tg==="a"){party.forEach(m=>{if(m.alive){const d=cD(e,sn);aD(m,d,false);}});msg=e.dn+" casts "+sn+"! Party hit!";}else{const d=cD(e,sn);const a=aD(tgt,d,false);msg=e.dn+" casts "+sn+"! "+a+" dmg!";if(!tgt.alive)msg+=" KO!";mkP(100+party.indexOf(tgt)*160,340,sp.color||"#F0F",12);}}}else if(act==="drain"){const d=cD(e);const a=aD(tgt,d,false);e.hp=Math.min(e.maxHp,e.hp+(a>>1));msg=e.dn+" drains "+tgt.name+"! "+a+" HP!";}else if(act==="special"){const d=Math.floor(cD(e)*1.6);const a=aD(tgt,d,false);msg=e.dn+" special! "+a+" dmg!";if(!tgt.alive)msg+=" KO!";mkP(100+party.indexOf(tgt)*160,340,C.OR,15);}else{const d=cD(e);const a=aD(tgt,d,false);msg=e.dn+" attacks "+tgt.name+"! "+a+" dmg!";if(!tgt.alive)msg+=" KO!";mkP(100+party.indexOf(tgt)*160,340,C.RD,8);}bLog(msg);}
+function chkEnd(){const aD2=b.enemies.every(e=>e.dead);const pD=party.every(m=>!m.alive||m.hp<=0);if(aD2){let exp=0,gold=0;b.enemies.forEach(e=>{exp+=e.exp;gold+=e.gold;});inv.gold+=gold;bLog("Victory! +"+exp+" EXP +"+gold+" Gil!");let lv=false;party.forEach(m=>{if(m.alive){m.exp+=exp;while(m.exp>=m.expNext){lv=true;lvUp(m);}}});b.phase="victory";setTimeout(()=>{gs=lv?STATES.LU:STATES.W;},1500);return "win";}if(pD){b.phase="defeat";setTimeout(()=>{gs=STATES.GO;},1500);return "lose";}return null;}
+function lvUp(m){m.exp-=m.expNext;m.level++;m.expNext=Math.floor(m.expNext*1.4);const hg=12+Math.floor(Math.random()*18),mg=m.maxMp>0?4+Math.floor(Math.random()*7):0;m.maxHp+=hg;m.hp=m.maxHp;m.maxMp+=mg;m.mp=m.maxMp;m.str+=Math.floor(Math.random()*3);m.def+=Math.floor(Math.random()*2);m.mag+=Math.floor(Math.random()*3);m.spd+=Math.floor(Math.random()*2);const lT={"Black Mage":{3:["Fira","Blizzara"],5:["Thundara"],7:["Firaga"],9:["Blizzaga","Drain"],11:["Thundaga"],13:["Quake","Bio"],15:["Meteor"]},"White Mage":{3:["Cura","Protect"],5:["Shell"],7:["Haste","Esuna"],9:["Curaga"],11:["Life"],13:["Holy"]}};const tb=lT[m.cls];if(tb&&tb[m.level])tb[m.level].forEach(s=>{if(!m.spells.includes(s))m.spells.push(s);});bLog(m.name+" is Lv "+m.level+"!");}
+function advT(){b.selMbr++;if(b.selMbr>=party.length)b.selMbr=0;let t=0;while(t<4&&(!party[b.selMbr].alive||party[b.selMbr].hp<=0)){b.selMbr=(b.selMbr+1)%party.length;t++;}if(t>=4){b.enemies.filter(e=>!e.dead).forEach(e=>doET(e));chkEnd();b.selMbr=gAlive();b.phase="select";b.menu="main";}else b.phase="select";}
+function hB(){if(b.phase==="victory"||b.phase==="defeat")return;uP();
+if(jp.ArrowUp){if(b.menu==="main")b.selAct=Math.max(0,b.selAct-1);else if(b.menu==="te"||b.menu==="te2")b.selTgt=Math.max(0,b.selTgt-1);else if(b.menu==="tp"||b.menu==="tp2")b.selTgt=Math.max(0,b.selTgt-1);else if(b.menu==="spell")b.selSp=Math.max(0,b.selSp-1);else if(b.menu==="item")b.selIt=Math.max(0,b.selIt-1);}
+if(jp.ArrowDown){const ma=b.menu==="main"?3:b.menu==="te"||b.menu==="te2"?b.enemies.filter(e=>!e.dead).length-1:b.menu==="tp"||b.menu==="tp2"?party.length-1:b.menu==="spell"?(party[b.selMbr].spells.length-1):Math.max(0,inv.items.length-1);if(b.menu==="main")b.selAct=Math.min(ma,b.selAct+1);else if(b.menu==="te"||b.menu==="te2")b.selTgt=Math.min(ma,b.selTgt+1);else if(b.menu==="tp"||b.menu==="tp2")b.selTgt=Math.min(ma,b.selTgt+1);else if(b.menu==="spell")b.selSp=Math.min(ma,b.selSp+1);else if(b.menu==="item")b.selIt=Math.min(ma,b.selIt+1);}
+if(jp.KeyZ||jp.Enter||jp.Space){const mbr=party[b.selMbr];
+if(b.menu==="main"){const acts=["attack","magic","item","flee"];const ch=acts[b.selAct||0];if(ch==="attack"){b.menu="te";b.selTgt=0;}else if(ch==="magic"){if(mbr.spells.length>0){b.menu="spell";b.selSp=0;}else bLog("No spells!");}else if(ch==="item"){if(inv.items.length>0){b.menu="item";b.selIt=0;}else bLog("No items!");}else{if(Math.random()>.45){bLog("Fled!");setTimeout(()=>{gs=STATES.W;},800);}else bLog("Cannot escape!");b.menu="main";}}
+else if(b.menu==="te"){const al=b.enemies.filter(e=>!e.dead);if(al.length){const t=al[Math.min(b.selTgt,al.length-1)];doPA(mbr,"attack",t,null,null);chkEnd();advT();b.menu="main";}}
+else if(b.menu==="spell"){const sn=mbr.spells[b.selSp];const sp=SP[sn];if(!sp){b.menu="main";return;}if(sp.tg==="a"||sp.t==="buff"){doPA(mbr,"magic",party[0],sn,null);chkEnd();advT();b.menu="main";}else if(sp.t==="heal"||sp.t==="revive"){b.pSp=sn;b.menu="tp";b.selTgt=0;}else{b.pSp=sn;b.menu="te2";b.selTgt=0;}}
+else if(b.menu==="te2"){const al=b.enemies.filter(e=>!e.dead);if(al.length){doPA(mbr,"magic",al[Math.min(b.selTgt,al.length-1)],b.pSp,null);chkEnd();advT();}b.menu="main";}
+else if(b.menu==="tp"){doPA(mbr,"magic",party[Math.min(b.selTgt,party.length-1)],b.pSp,null);chkEnd();advT();b.menu="main";}
+else if(b.menu==="item"){const it=inv.items[b.selIt];if(!it){b.menu="main";return;}if(it.e==="rest"){doPA(mbr,"item",mbr,null,it.name);chkEnd();advT();b.menu="main";}else{b.pIt=it.name;b.menu="tp2";b.selTgt=0;}}
+else if(b.menu==="tp2"){doPA(mbr,"item",party[Math.min(b.selTgt,party.length-1)],null,b.pIt);chkEnd();advT();b.menu="main";}}
+if(jp.KeyX||jp.Escape){if(b.menu!=="main")b.menu="main";}}
+function dT(t,x,y,c,s){ctx.fillStyle=c||"#FFF";ctx.font=(s||14)+"px \"Courier New\"";ctx.fillText(t,x,y);}
+function dTC(t,x,y,c,s){ctx.font=(s||14)+"px \"Courier New\"";ctx.textAlign="center";ctx.fillStyle=c||"#FFF";ctx.fillText(t,x,y);ctx.textAlign="left";}
+function dBx(x,y,w,h,fill,bdr){ctx.fillStyle=fill||"rgba(5,5,25,.97)";ctx.fillRect(x,y,w,h);ctx.strokeStyle=bdr||"#4466AA";ctx.lineWidth=2;ctx.strokeRect(x+1,y+1,w-2,h-2);ctx.strokeStyle="#2244AA";ctx.lineWidth=1;ctx.strokeRect(x+3,y+3,w-6,h-6);ctx.fillStyle="#6688CC";ctx.fillRect(x,y,5,5);ctx.fillRect(x+w-5,y,5,5);ctx.fillRect(x,y+h-5,5,5);ctx.fillRect(x+w-5,y+h-5,5,5);}
+function hpB(x,y,w,hp,mx){const r=Math.max(0,hp/mx);ctx.fillStyle="#1A0000";ctx.fillRect(x,y,w,7);ctx.fillStyle=r>.5?"#44FF44":r>.25?"#FFAA00":"#FF2200";ctx.fillRect(x,y,Math.floor(w*r),7);ctx.strokeStyle="#335533";ctx.lineWidth=1;ctx.strokeRect(x,y,w,7);}
+function mpB(x,y,w,mp,mx){if(!mx)return;const r=Math.max(0,mp/mx);ctx.fillStyle="#00001A";ctx.fillRect(x,y,w,7);ctx.fillStyle="#2266FF";ctx.fillRect(x,y,Math.floor(w*r),7);ctx.strokeStyle="#223355";ctx.lineWidth=1;ctx.strokeRect(x,y,w,7);}
+function eB(x,y,w,e,en){const r=Math.min(1,e/en);ctx.fillStyle="#1A1A00";ctx.fillRect(x,y,w,5);ctx.fillStyle="#FFDD00";ctx.fillRect(x,y,Math.floor(w*r),5);}
+let frm=0,wA=0,eS=0,eT=15+Math.floor(Math.random()*10),tFrm=0,tOpt=0;
+function drawT(){tFrm++;ctx.fillStyle="#000008";ctx.fillRect(0,0,800,600);for(let i=0;i<150;i++){const sx=(i*137.5+tFrm*.2)%800,sy=(i*83.7)%600;const tw=Math.sin(tFrm*.05+i)*.5+.5;ctx.fillStyle="rgba(255,255,255,"+(0.2+tw*.8)+")";ctx.fillRect(sx,sy,i%5===0?2:1,i%5===0?2:1);}const cc=["#4488FF","#FF44FF","#44FFFF","#FFAA44","#44FF88"];for(let c=0;c<5;c++){const x2=100+c*140,y2=100+Math.sin(tFrm*.02+c*1.3)*20;ctx.save();ctx.translate(x2,y2);ctx.rotate(tFrm*.01*(c%2?1:-1));ctx.strokeStyle=cc[c];ctx.lineWidth=2;ctx.globalAlpha=.7;ctx.beginPath();ctx.moveTo(0,-25);ctx.lineTo(14,0);ctx.lineTo(0,25);ctx.lineTo(-14,0);ctx.closePath();ctx.stroke();ctx.fillStyle=cc[c];ctx.globalAlpha=.15;ctx.fill();ctx.restore();ctx.globalAlpha=1;}
+const p=Math.sin(tFrm*.02)*.05+.95;ctx.save();ctx.translate(400,200);ctx.scale(p,p);ctx.textAlign="center";ctx.font="bold 58px \"Courier New\"";ctx.fillStyle="#000";ctx.fillText("CRYSTAL",2,2);ctx.fillText("CHRONICLES",2,62);const g=ctx.createLinearGradient(-200,-30,200,70);g.addColorStop(0,"#FFDD44");g.addColorStop(.5,"#FFF");g.addColorStop(1,"#FFAA00");ctx.fillStyle=g;ctx.fillText("CRYSTAL",0,0);ctx.fillText("CHRONICLES",0,60);ctx.font="18px \"Courier New\"";ctx.fillStyle="#AACCFF";ctx.fillText("~ A Final Fantasy Tribute ~",0,90);ctx.restore();ctx.textAlign="left";
+["NEW GAME","ABOUT"].forEach((o,i)=>{const sel=tOpt===i;const oy=380+i*55;if(sel)dBx(270,oy-28,260,42);ctx.font=sel?"bold 18px \"Courier New\"":"16px \"Courier New\"";dTC((sel?"> ":" ")+o+(sel?" <":" "),400,oy,sel?"#FFD700":"#8899BB",18);});ctx.fillStyle="#445566";ctx.font="12px \"Courier New\"";dTC("Arrow Keys: Navigate   Z/Enter: Select",400,555,"#445566",12);}
+function drawW(){const tc={0:C.GRASS,1:C.WATER,2:C.MTN,3:C.FOREST,4:C.SAND,5:C.TOWN,6:C.CAVE,7:C.CAVE,8:C.ROAD,9:"#E8E8FF"};ctx.fillStyle="#000";ctx.fillRect(0,0,800,480);for(let ty=0;ty<VY+1;ty++){for(let tx=0;tx<VX+1;tx++){const wx=tx+cx,wy=ty+cy;if(wx<0||wy<0||wx>=map[0].length||wy>=map.length)continue;const tile=map[wy][wx];const sx=tx*TS,sy=ty*TS;ctx.fillStyle=tc[tile]||"#222";ctx.fillRect(sx,sy,TS,TS);if(tile===TI.WA){ctx.fillStyle="rgba(50,100,200,.3)";ctx.fillRect(sx,sy+((frm*2)%TS)/2,TS,4);}else if(tile===TI.GR){ctx.fillStyle=C.G2;ctx.fillRect(sx,sy+TS-5,TS,5);}else if(tile===TI.MT){ctx.fillStyle=C.M2;ctx.fillRect(sx+TS/4|0,sy,TS/2|0,TS*.7|0);}else if(tile===TI.FO){ctx.fillStyle="#0A2A0A";for(let i=0;i<3;i++)ctx.fillRect(sx+5+i*12,sy+5,8,TS-10);}else if(tile===TI.TO){ctx.fillStyle="#CC9944";ctx.fillRect(sx+8,sy+5,TS-16,TS-12);}else if(tile===TI.CA||tile===TI.DU){ctx.fillStyle="#111";ctx.beginPath();ctx.arc(sx+TS/2,sy+TS/2,TS/3,0,Math.PI*2);ctx.fill();}else if(tile===TI.RO){ctx.fillStyle="#AA9977";ctx.fillRect(sx+TS/3|0,sy,TS/3|0,TS);}ctx.strokeStyle="rgba(0,0,0,.15)";ctx.lineWidth=1;ctx.strokeRect(sx,sy,TS,TS);const loc=locs.find(l=>l.x===wx&&l.y===wy);if(loc){ctx.fillStyle="#FFF";ctx.font="9px \"Courier New\"";ctx.textAlign="center";ctx.fillText(loc.name,sx+TS/2,sy+TS-3);ctx.textAlign="left";}}}
+const psx=(px-cx)*TS,psy=(py-cy)*TS;const bob=Math.sin(wA)*3;ctx.fillStyle="#FFF";ctx.fillRect(psx+10,psy+2+bob,20,20);ctx.fillStyle="#FFD700";ctx.fillRect(psx+12,psy+bob,16,14);ctx.fillStyle="#4488FF";ctx.fillRect(psx+10,psy+14+bob,20,12);ctx.fillStyle="#FFD700";ctx.fillRect(psx+8,psy+22+bob,5,8);ctx.fillRect(psx+27,psy+22+bob,5,8);}
+function drawHUD(){dBx(0,480,800,120,"rgba(3,3,15,.98)","#4466AA");dT("World of Crystal | Gold: "+inv.gold+" Gil",10,498,"#CCDDFF",12);party.forEach((m,i)=>{const bx=10+i*195,by=508;dBx(bx,by,188,86,"rgba(5,5,20,.9)",m.alive?"#4466AA":"#442222");ctx.fillStyle=m.alive?"#FFF":"#AA6666";ctx.font="bold 12px \"Courier New\"";ctx.fillText(m.name,bx+8,by+16);ctx.font="10px \"Courier New\"";ctx.fillStyle="#AAAACC";ctx.fillText("Lv"+m.level+" "+m.cls,bx+8,by+28);dT("HP",bx+8,by+44,"#FF8888",11);hpB(bx+28,by+36,120,m.hp,m.maxHp);dT(m.hp+"/"+m.maxHp,bx+155,by+44,"#FFF",10);if(m.maxMp>0){dT("MP",bx+8,by+58,"#8888FF",11);mpB(bx+28,by+50,120,m.mp,m.maxMp);dT(m.mp+"/"+m.maxMp,bx+155,by+58,"#AAAAFF",10);}if(!m.alive){ctx.fillStyle="rgba(150,0,0,.4)";ctx.fillRect(bx+2,by+2,184,82);dT("KO",bx+85,by+47,"#FF4444",16);}eB(bx+8,by+70,172,m.exp,m.expNext);});dT("Z:Confirm X:Cancel Arrows:Move/Select M:Menu",10,594,"#445566",11);}
+function drawB(){const bg=ctx.createLinearGradient(0,0,0,480);bg.addColorStop(0,b.bg);bg.addColorStop(1,"#000");ctx.fillStyle=bg;ctx.fillRect(0,0,800,480);ctx.strokeStyle="#2244AA";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,380);ctx.lineTo(800,380);ctx.stroke();
+b.enemies.forEach((e,i)=>{if(e.dead)return;const ex=480+i*100,ey=200+Math.sin(frm*.04+i*2)*5;const ec=e.c||"#FFF";
+if(e.boss){ctx.fillStyle=ec;ctx.fillRect(ex-45,ey-15,90,95);ctx.fillStyle="rgba(0,0,0,.5)";ctx.fillRect(ex-38,ey-8,76,22);ctx.fillStyle="#000";ctx.fillRect(ex-28,ey+12,16,16);ctx.fillRect(ex+12,ey+12,16,16);for(let h=0;h<4;h++){ctx.fillStyle=ec;ctx.save();ctx.translate(ex,ey-10);ctx.rotate(h*Math.PI/2+frm*.025);ctx.fillRect(-50,-5,22,9);ctx.restore();}}else{ctx.fillStyle=ec;ctx.fillRect(ex-20,ey+10,40,40);ctx.fillRect(ex-12,ey,24,15);ctx.fillStyle="#000";ctx.fillRect(ex-8,ey+4,6,6);ctx.fillRect(ex+2,ey+4,6,6);ctx.fillStyle=ec;ctx.fillRect(ex-28,ey+18,8,28);ctx.fillRect(ex+20,ey+18,8,28);}
+dBx(ex-40,ey-30,80,18,"rgba(0,0,0,.8)","#333355");hpB(ex-36,ey-24,72,e.hp,e.maxHp);dT(e.dn,ex-38,ey-32,"#CCCCFF",9);});
+party.forEach((m,i)=>{const px2=80+i*150,py2=310;if(!m.alive)ctx.globalAlpha=.3;ctx.fillStyle={W:"#4488FF",M:"#AA44FF",H:"#44FF88",T:"#FFAA44"}[m.p]||"#FFF";ctx.fillRect(px2-15,py2,30,40);ctx.fillRect(px2-10,py2-15,20,17);ctx.fillStyle="rgba(0,0,0,.5)";ctx.fillRect(px2-8,py2-10,7,7);ctx.fillRect(px2+1,py2-10,7,7);ctx.globalAlpha=1;if(m.alive&&i===b.selMbr&&b.phase==="select"){ctx.strokeStyle="#FFD700";ctx.lineWidth=2;ctx.strokeRect(px2-18,py2-18,36,62);}});
+b.pts.forEach(p=>{ctx.globalAlpha=p.life;ctx.fillStyle=p.col;ctx.fillRect(p.x,p.y,p.sz,p.sz);});ctx.globalAlpha=1;
+dBx(0,480,500,120,"rgba(3,3,15,.97)","#4466AA");b.log.slice(-4).forEach((l,i)=>dT(l,10,500+i*18,i===b.log.length-1?"#FFF":"#AAAACC",11));
+const mbr=party[b.selMbr];
+if(b.menu==="main"){dBx(500,480,300,120,"rgba(3,3,15,.97)","#4466AA");dT(mbr.name+" - Lv "+mbr.level,510,496,"#CCDDFF",12);["Attack","Magic","Item","Flee"].forEach((a,i)=>{const sel=i===b.selAct;dT((sel?"> ":" ")+a,510,514+i*22,sel?"#FFD700":"#CCCCFF",13);});}
+else if(b.menu==="spell"||b.menu==="te2"){dBx(460,380,340,220,"rgba(3,3,15,.97)","#AA44FF");dT(b.menu==="te2"?"Select Enemy:":"-- MAGIC --",470,400,"#CCAAFF",13);if(b.menu==="spell"){mbr.spells.forEach((s,i)=>{const sp=SP[s];const sel=i===b.selSp;dT((sel?"> ":" ")+s,470,418+i*18,sel?"#FFD700":"#FFF",12);if(sp)dT((sp.mp||0)+" MP",660,418+i*18,"#8888FF",11);});}else{b.enemies.filter(e=>!e.dead).forEach((e,i)=>dT((i===b.selTgt?">":"  ")+e.dn,470,418+i*20,i===b.selTgt?"#FFD700":"#FFF",12));}}
+else if(b.menu==="tp"){dBx(460,380,340,220,"rgba(3,3,15,.97)","#44FF88");dT("Select Ally:",470,400,"#88FF88",13);party.forEach((m,i)=>dT((i===b.selTgt?">":"  ")+m.name+" "+m.hp+"/"+m.maxHp,470,418+i*22,i===b.selTgt?"#FFD700":"#FFF",12));}
+else if(b.menu==="item"||b.menu==="tp2"){dBx(460,360,340,240,"rgba(3,3,15,.97)","#44FF88");dT(b.menu==="tp2"?"Select Ally:":"-- ITEMS --",470,378,"#88FF88",13);if(b.menu==="item")inv.items.forEach((it,i)=>{const sel=i===b.selIt;dT((sel?"> ":" ")+it.name+" x"+it.qty,470,396+i*19,sel?"#FFD700":"#FFF",12);});else party.forEach((m,i)=>dT((i===b.selTgt?">":"  ")+m.name+" "+m.hp+"HP",470,396+i*20,i===b.selTgt?"#FFD700":"#FFF",12));}
+else if(b.menu==="te"){dBx(460,440,340,140,"rgba(3,3,15,.97)","#FF4444");dT("Select Enemy:",470,458,"#FF8888",13);b.enemies.filter(e=>!e.dead).forEach((e,i)=>{dT((i===b.selTgt?"> ":" ")+e.dn,470,476+i*20,i===b.selTgt?"#FFD700":"#FFF",12);dT(e.hp+"/"+e.maxHp,680,476+i*20,"#AAAAFF",11);});}}
+let mCur=0,sCh=0,mCh=0,iCur=0;
+const mTabs=["Status","Items","Magic","Save"];
+function drawM(){ctx.fillStyle="rgba(0,0,0,.85)";ctx.fillRect(0,0,800,600);dBx(0,0,800,600,"transparent","#4466AA");mTabs.forEach((t,i)=>{const sel=mCur===i;dBx(5+i*197,5,192,35,sel?"rgba(40,60,120,.9)":"rgba(5,5,25,.8)",sel?"#AABBFF":"#4466AA");dTC(t,5+i*197+96,27,sel?"#FFD700":"#AABBFF",14);});dBx(5,45,790,545,"rgba(3,3,15,.9)","#4466AA");const tab=mTabs[mCur];
+if(tab==="Status"){const m=party[sCh];dBx(15,55,380,525,"rgba(5,5,20,.9)","#4466AA");dBx(405,55,380,525,"rgba(5,5,20,.9)","#4466AA");party.forEach((c,i)=>{const sel=i===sCh;dBx(20,65+i*120,370,115,sel?"rgba(20,30,70,.9)":"rgba(5,5,20,.6)",sel?"#AABBFF":"#4466AA");dT(c.name,35,85+i*120,sel?"#FFD700":"#FFF",16);dT("Lv "+c.level+" "+c.cls,35,103+i*120,"#AAAACC",13);dT("HP:",35,120+i*120,"#FF8888",12);hpB(60,111+i*120,200,c.hp,c.maxHp);dT(c.hp+"/"+c.maxHp,270,120+i*120,"#FFF",12);if(c.maxMp>0){dT("MP:",35,138+i*120,"#8888FF",12);mpB(60,130+i*120,200,c.mp,c.maxMp);dT(c.mp+"/"+c.maxMp,270,138+i*120,"#AAAAFF",12);}if(!c.alive){ctx.fillStyle="rgba(150,0,0,.4)";ctx.fillRect(20,65+i*120,370,115);dT("KO",175,130+i*120,"#FF4444",18);}});const st=[["Lv",m.level],["EXP",m.exp+"/"+m.expNext],["STR",m.str],["DEF",m.def],["MAG",m.mag],["SPD",m.spd],["Weapon",m.weapon],["Armor",m.armor]];st.forEach((s,i)=>{dT(s[0]+":",420,100+i*35,"#AACCFF",12);dT(""+s[1],545,100+i*35,"#FFF",12);});eB(420,400,360,m.exp,m.expNext);}
+else if(tab==="Items"){dT("-- ITEMS (Gold: "+inv.gold+" Gil) --",20,68,"#FFD700",14);if(!inv.items.length){dTC("No items!",400,300,"#AAAACC",18);return;}inv.items.forEach((it,i)=>{const sel=i===iCur;dBx(15,85+i*40,770,36,sel?"rgba(20,40,80,.9)":"rgba(5,5,25,.6)",sel?"#AABBFF":"#4466AA");dT(it.name,30,108+i*40,sel?"#FFD700":"#FFF",14);dT("x"+it.qty,200,108+i*40,"#AAAACC",13);dT(it.d||"",250,108+i*40,"#CCCCAA",12);});}
+else if(tab==="Magic"){party.forEach((m,i)=>{const sel=i===mCh;dBx(5+i*198,55,193,45,sel?"rgba(20,30,80,.9)":"rgba(5,5,25,.6)",sel?"#AA88FF":"#4466AA");dT((sel?"> ":" ")+m.name,15+i*198,82,sel?"#FFD700":"#FFF",14);});const m=party[mCh];dT("-- "+m.name+"'s Spells --",20,115,"#AA88FF",14);if(!m.spells.length){dT("No spells.",30,140,"#AAAACC",13);}m.spells.forEach((s,i)=>{const sp=SP[s];if(!sp)return;const bx=20+(i%3)*260,by=140+Math.floor(i/3)*50;dBx(bx,by,250,42,"rgba(5,5,25,.7)","#AA44FF");dT(s,bx+10,by+16,"#CCAAFF",13);dT((sp.mp||0)+" MP",bx+160,by+16,"#8888FF",12);});}
+else{dTC("-- SAVE GAME --",400,100,"#FFD700",18);dBx(200,130,400,80,"rgba(5,5,20,.9)","#AABBFF");dT("Z: Save to localStorage",220,165,"#FFF",14);dT("Saved: Party Lv~"+Math.round(party.reduce((s,m)=>s+m.level,0)/party.length)+" Gold:"+inv.gold,220,185,"#AAAACC",13);}}
+function hM(){if(jp.ArrowLeft)mCur=Math.max(0,mCur-1);if(jp.ArrowRight)mCur=Math.min(mTabs.length-1,mCur+1);const t=mTabs[mCur];if(t==="Status"){if(jp.ArrowUp)sCh=Math.max(0,sCh-1);if(jp.ArrowDown)sCh=Math.min(party.length-1,sCh+1);}if(t==="Items"){if(jp.ArrowUp)iCur=Math.max(0,iCur-1);if(jp.ArrowDown)iCur=Math.min(inv.items.length-1,iCur+1);}if(t==="Magic"){if(jp.ArrowUp)mCh=Math.max(0,mCh-1);if(jp.ArrowDown)mCh=Math.min(party.length-1,mCh+1);}if(t==="Save"&&(jp.KeyZ||jp.Enter)){const sv={party:JSON.parse(JSON.stringify(party)),inv:JSON.parse(JSON.stringify(inv)),px,py};try{localStorage.setItem("crystalChronicles",JSON.stringify(sv));bLog("Game saved!");}catch(e){}}if(jp.KeyX||jp.Escape||jp.KeyM)gs=ps||STATES.W;}
+let shLoc=null,shCur=0,shMode="buy";
+function openSh(loc){shLoc=loc;shCur=0;shMode="buy";gs=STATES.SH;}
+function drawSh(){ctx.fillStyle="rgba(0,0,0,.85)";ctx.fillRect(0,0,800,600);dBx(50,30,700,540,"rgba(3,3,15,.97)","#AA8833");dTC("~~ SHOP: "+shLoc.name+" ~~",400,58,"#FFD700",18);dTC("Gold: "+inv.gold+" Gil",400,80,"#FFDD88",14);["BUY","INN"].forEach((m,i)=>{const sel=(i===0&&shMode==="buy")||(i===1&&shMode==="inn");dBx(60+i*340,90,200,35,sel?"rgba(20,40,10,.9)":"rgba(5,5,15,.6)",sel?"#44FF88":"#4466AA");dTC(m,60+i*340+100,112,sel?"#FFD700":"#AAAACC",14);});if(shMode==="buy"){dT("-- Items for Sale --",70,148,"#CCDDAA",13);shLoc.s.forEach((name,i)=>{const sel=i===shCur;dBx(60,160+i*45,680,40,sel?"rgba(30,50,10,.9)":"rgba(5,5,15,.6)",sel?"#44FF88":"#4466AA");const cost=IC[name]||99;const owned=inv.items.find(it=>it.name===name);dT(name,80,183+i*45,sel?"#FFD700":"#FFF",14);dT(cost+" Gil",300,183+i*45,"#FFDD44",13);dT("Owned: "+(owned?owned.qty:0),450,183+i*45,"#AAAACC",12);});dT("Z:Buy  X:Leave  Left/Right:Tab",70,560,"#557744",13);}else{dBx(150,180,500,200,"rgba(5,5,20,.9)","#FF8844");dTC("Rest at the Inn?",400,220,"#FFF",18);dTC("Cost: "+shLoc.i+" Gil",400,250,"#FFDD44",16);dTC("Fully restores all HP and MP!",400,280,"#AACCAA",14);dTC("Z:Rest  X:Leave",400,360,"#FFAA44",15);}}
+function hSh(){if(jp.ArrowUp)shCur=Math.max(0,shCur-1);if(jp.ArrowDown)shCur=Math.min(shMode==="buy"?shLoc.s.length-1:0,shCur+1);if(jp.ArrowLeft||jp.ArrowRight)shMode=shMode==="buy"?"inn":"buy";
+if(jp.KeyZ||jp.Enter){if(shMode==="buy"){const name=shLoc.s[shCur];const cost=IC[name]||99;if(inv.gold>=cost){inv.gold-=cost;const ex=inv.items.find(i=>i.name===name);if(ex)ex.qty++;else{const bs={Potion:{e:"heal",v:100},HiPotion:{e:"heal",v:250},Ether:{e:"mp",v:30},Antidote:{e:"cure_poison",v:0},Tent:{e:"rest",v:0},PhoenixDown:{e:"revive",v:0},Elixir:{e:"elixir",v:0},MegaPotion:{e:"heal",v:500}};const b2=bs[name]||{e:"heal",v:50};inv.items.push({name,qty:1,c:cost,...b2,d:name});}}else bLog("Not enough gold!");}else if(shMode==="inn"){if(inv.gold>=shLoc.i){inv.gold-=shLoc.i;party.forEach(m=>{if(m.alive){m.hp=m.maxHp;m.mp=m.maxMp;}});bLog("Rested! HP/MP restored!");}else bLog("Not enough gold!");gs=STATES.W;}}if(jp.KeyX||jp.Escape)gs=STATES.W;}
+function drawGO(){ctx.fillStyle="rgba(0,0,0,.92)";ctx.fillRect(0,0,800,600);ctx.fillStyle="rgba(100,0,0,.5)";ctx.fillRect(0,0,800,600);dTC("GAME OVER",400,220,"#FF2222",52);dTC("The party has been defeated...",400,300,"#AA4444",18);dTC("Press Z to return to title",400,380,"#886666",15);}
+function drawLU(){ctx.fillStyle="rgba(0,0,20,.95)";ctx.fillRect(0,0,800,600);dBx(150,60,500,480,"rgba(5,5,30,.97)","#FFD700");dTC("~ LEVEL UP! ~",400,100,"#FFD700",22);party.filter(m=>m.alive).forEach((m,i)=>{dBx(170,130+i*100,460,90,"rgba(10,10,40,.9)","#AABBFF");dT(m.name+" is now Level "+m.level+"!",185,155+i*100,"#FFF",14);dT("HP:"+m.maxHp+" MP:"+m.maxMp+" STR:"+m.str+" DEF:"+m.def,185,175+i*100,"#44FF88",12);});dTC("Press Z to continue!",400,510,"#FFDD44",16);}
+let dTxt="",dCb=null;
+function showDlg(t,cb){dTxt=t;dCb=cb;ps=ps||STATES.W;gs=STATES.DI;}
+function drawDlg(){dBx(80,340,640,220,"rgba(3,3,15,.97)","#4466AA");const lines=dTxt.match(/.{1,60}/g)||[];lines.forEach((l,i)=>dTC(l,400,400+i*22,"#FFF",14));dTC("Z: Continue",400,540,"#AAAACC",13);}
+function hW(){if(jp.KeyM||jp.KeyI){mCur=0;ps=STATES.W;gs=STATES.M;return;}let nx=px,ny=py,mv=false;if(keys.ArrowLeft&&frm%8===0){nx--;mv=true;}else if(keys.ArrowRight&&frm%8===0){nx++;mv=true;}else if(keys.ArrowUp&&frm%8===0){ny--;mv=true;}else if(keys.ArrowDown&&frm%8===0){ny++;mv=true;}if(mv){if(nx<0||ny<0||nx>=map[0].length||ny>=map.length)return;const tile=map[ny][nx];if(tile===TI.MT||tile===TI.WA)return;const loc=locs.find(l=>l.x===nx&&l.y===ny);if(loc){px=nx;py=ny;if(loc.t==="town"){openSh(loc);return;}else{showDlg("Entering "+loc.name+"...",null);setTimeout(()=>{startB(loc.t==="dungeon"?"dungeon":"cave");},500);return;}}px=nx;py=ny;wA+=.5;const hx=Math.floor(VX/2),hy=Math.floor(VY/2);cx=Math.max(0,Math.min(map[0].length-VX,px-hx));cy=Math.max(0,Math.min(map.length-VY,py-hy));const aM={0:"grass",3:"forest",4:"sand"};const area=aM[tile];if(area){eS++;if(eS>=eT){eS=0;eT=12+Math.floor(Math.random()*10);if(Math.random()<.65)startB(area);}}}if(jp.KeyZ||jp.Enter){const loc=locs.find(l=>l.x===px&&l.y===py);if(loc&&loc.t==="town")openSh(loc);}}
+function hT(){if(jp.ArrowUp||jp.ArrowLeft)tOpt=Math.max(0,tOpt-1);if(jp.ArrowDown||jp.ArrowRight)tOpt=Math.min(1,tOpt+1);if(jp.KeyZ||jp.Enter||jp.Space){if(tOpt===0){try{const sv=localStorage.getItem("crystalChronicles");if(sv){const d=JSON.parse(sv);d.party.forEach((dp,i)=>{if(party[i])Object.assign(party[i],dp);});Object.assign(inv,d.inv);px=d.px||3;py=d.py||8;}}catch(e){}ps=STATES.W;gs=STATES.W;}else{showDlg("Controls: Arrow Keys=Move/Navigate | Z/Enter=Confirm | X/Esc=Cancel | M=Menu | Explore the world, fight enemies, level up! Visit towns to buy items. Find the Chaos Shrine to face CHAOS!",null);}}}
+function update(){frm++;if(gs===STATES.T)hT();else if(gs===STATES.W)hW();else if(gs===STATES.B)hB();else if(gs===STATES.M)hM();else if(gs===STATES.SH)hSh();else if(gs===STATES.LU&&(jp.KeyZ||jp.Enter))gs=STATES.W;else if(gs===STATES.GO&&(jp.KeyZ||jp.Enter)){party.forEach(m=>{m.alive=true;m.hp=Math.max(1,Math.floor(m.maxHp*.2));});gs=STATES.T;}else if(gs===STATES.DI&&(jp.KeyZ||jp.Enter)){if(dCb)dCb();else gs=ps||STATES.W;}clr();}
+function draw(){ctx.clearRect(0,0,800,600);if(gs===STATES.T)drawT();else if(gs===STATES.W){drawW();drawHUD();}else if(gs===STATES.B)drawB();else if(gs===STATES.M){drawW();drawHUD();drawM();}else if(gs===STATES.SH)drawSh();else if(gs===STATES.LU)drawLU();else if(gs===STATES.GO)drawGO();else if(gs===STATES.DI){drawW();drawHUD();drawDlg();}}
+const hx0=Math.floor(VX/2),hy0=Math.floor(VY/2);cx=Math.max(0,Math.min(map[0].length-VX,px-hx0));cy=Math.max(0,Math.min(map.length-VY,py-hy0));
+(function loop(){update();draw();requestAnimationFrame(loop);})();
 </script>
 </body>
 </html>
